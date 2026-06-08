@@ -1,3 +1,19 @@
 [tools]
 node = "24.17.0"
 pnpm = "11.8.0"
+
+[tasks.fmt]
+description = "Format the Rust workspace"
+run = "cargo fmt --all"
+
+[tasks.lint]
+description = "Lint the Rust workspace"
+run = "cargo clippy --workspace --all-targets -- -D warnings"
+
+[tasks.test]
+description = "Run the Rust test suite"
+run = "cargo test --workspace --all-targets"
+
+[tasks.e2e]
+description = "Run ignored end-to-end tests"
+run = "cargo test --workspace --all-targets -- --ignored"
