@@ -1,0 +1,25 @@
+[package]
+name = "creance-engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+creance-proxy = { path = "../creance-proxy" }
+creance-sandbox = { path = "../creance-sandbox" }
+fspy = { git = "https://github.com/voidzero-dev/vite-task", rev = "8daa9bb72faa89b745cb58c087b416b15d3bddc5", package = "fspy" }
+serde.workspace = true
+serde_json.workspace = true
+tempfile.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+
+[[bin]]
+name = "connect-probe"
+path = "src/bin/connect-probe.rs"
+test = true
