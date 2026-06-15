@@ -1,0 +1,18 @@
+{
+  "schema": 1,
+  "os": [
+    "darwin"
+  ],
+  "file_read": [
+    "${PKG_DIR}",
+    "${PROJECT_ROOT}",
+    "/private/var/db/timezone/tz/2026b.1.0/zoneinfo/Asia/Shanghai"
+  ],
+  "file_write": [
+    "${PKG_DIR}/data.json"
+  ],
+  "network": {
+    "mode": "proxy-only",
+    "domains": []
+  }
+}

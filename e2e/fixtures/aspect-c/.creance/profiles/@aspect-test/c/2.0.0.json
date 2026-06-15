@@ -1,0 +1,24 @@
+{
+  "package": {
+    "name": "@aspect-test/c",
+    "version": "2.0.0"
+  },
+  "creance": "0.1.0",
+  "lifecycle": "postinstall",
+  "entries": [
+    {
+      "os": [
+        "darwin"
+      ],
+      "read": [
+        "${PKG_DIR}",
+        "${PROJECT_ROOT}",
+        "/private/var/db/timezone/tz/2026b.1.0/zoneinfo/Asia/Shanghai"
+      ],
+      "write": [
+        "${PKG_DIR}/data.json"
+      ],
+      "domains": []
+    }
+  ]
+}
