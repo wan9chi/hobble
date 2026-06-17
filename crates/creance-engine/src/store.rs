@@ -1,4 +1,7 @@
-use std::path::{Path, PathBuf};
+use std::{
+    collections::BTreeSet,
+    path::{Path, PathBuf},
+};
 
 use anyhow::{Context as _, Result};
 
@@ -28,13 +31,24 @@ pub fn upsert_entry(profile: &mut Profile, entry: Entry) {
         .iter_mut()
         .find(|existing| existing.os == entry.os)
     {
-        *existing = entry;
+        existing.read = merge_sorted(&existing.read, &entry.read);
+        existing.write = merge_sorted(&existing.write, &entry.write);
+        existing.domains = merge_sorted(&existing.domains, &entry.domains);
     } else {
         profile.entries.push(entry);
     }
     profile
         .entries
         .sort_by(|left, right| left.os.cmp(&right.os));
+}
+
+fn merge_sorted(left: &[String], right: &[String]) -> Vec<String> {
+    left.iter()
+        .chain(right)
+        .cloned()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
 }
 
 pub fn save(dir: &Path, profile: &Profile) -> Result<PathBuf> {
@@ -70,7 +84,10 @@ mod tests {
         darwin.read = vec!["${PROJECT_ROOT}/**".to_string()];
         upsert_entry(&mut profile, darwin.clone());
         assert_eq!(profile.entries.len(), 2);
-        assert_eq!(profile.entries[0], darwin);
+        assert_eq!(
+            profile.entries[0].read,
+            vec!["${PKG_DIR}/**", "${PROJECT_ROOT}/**"]
+        );
 
         save(temp.path(), &profile).unwrap();
         assert_eq!(load(temp.path(), "pkg", "1.0.0").unwrap(), Some(profile));

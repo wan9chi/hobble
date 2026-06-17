@@ -3,7 +3,8 @@ use std::{ffi::OsStr, fs, os::unix::fs::PermissionsExt, path::Path, process::Com
 #[test]
 fn shim_observes_saves_enforces_and_blocks_tampering() {
     let temp = tempfile::tempdir().unwrap();
-    let pkg = temp.path().join("pkg");
+    let project = temp.path().join("project");
+    let pkg = project.join("node_modules/.pnpm/pkg@1.0.0/node_modules/pkg");
     let creance_dir = temp.path().join(".creance");
     let outside = temp.path().join("outside");
     fs::create_dir_all(&pkg).unwrap();
@@ -13,6 +14,7 @@ fn shim_observes_saves_enforces_and_blocks_tampering() {
         .arg("-c")
         .arg("echo hi; echo x > \"$PWD/out\"")
         .env("CREANCE_MODE", "observe")
+        .env("INIT_CWD", &project)
         .status()
         .unwrap();
     assert!(status.success());
@@ -24,6 +26,7 @@ fn shim_observes_saves_enforces_and_blocks_tampering() {
         .arg("echo hi; echo x > \"$PWD/out\"")
         .env("CREANCE_MODE", "enforce")
         .env("CREANCE_STRICT", "1")
+        .env("INIT_CWD", &project)
         .status()
         .unwrap();
     assert!(status.success());
@@ -33,6 +36,7 @@ fn shim_observes_saves_enforces_and_blocks_tampering() {
         .arg("echo bad > \"$OUTSIDE/pwned\"")
         .env("CREANCE_MODE", "enforce")
         .env("CREANCE_STRICT", "1")
+        .env("INIT_CWD", &project)
         .env("OUTSIDE", &outside)
         .status()
         .unwrap();
@@ -116,6 +120,25 @@ fn install_command_wires_enforce_mode_and_strict_flag() {
     let argv = fs::read_to_string(temp.path().join("argv-strict")).unwrap();
     assert!(argv.contains("--offline\n"));
     assert!(!argv.contains("--strict\n"));
+}
+
+#[test]
+fn shim_skips_first_party_scripts_without_profile() {
+    let temp = tempfile::tempdir().unwrap();
+    let pkg = temp.path().join("pkg");
+    let creance_dir = temp.path().join(".creance");
+    fs::create_dir_all(&pkg).unwrap();
+
+    let status = shim_command(&pkg, &creance_dir)
+        .arg("-c")
+        .arg("echo first-party > \"$PWD/out\"")
+        .env("CREANCE_MODE", "enforce")
+        .env("CREANCE_STRICT", "1")
+        .status()
+        .unwrap();
+    assert!(status.success());
+    assert!(!pkg.join("out").exists());
+    assert!(!creance_dir.exists());
 }
 
 fn shim_command(pkg: &Path, creance_dir: &Path) -> Command {

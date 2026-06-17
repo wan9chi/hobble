@@ -61,10 +61,11 @@ This ledger records implementation decisions that close gaps or deviations from
   `--config.dangerously-allow-all-builds=true` is always accepted. pnpm 11
   rejects that flag when `pnpm-lock.yaml` already contains
   `onlyBuiltDependencies`.
-- **Decision:** pass the dangerous allow-all flag only when there is no lockfile
-  allowlist. Skip it whenever `pnpm-lock.yaml` already carries
-  `onlyBuiltDependencies`. The shim remains the gatekeeper either way because
-  `script-shell` is still set to `creance`.
+- **Decision:** pass the dangerous allow-all flag only when there is no
+  allowlist in `pnpm-lock.yaml`, `pnpm-workspace.yaml`, or root `package.json`.
+  Skip it whenever those files already carry `onlyBuiltDependencies`. The shim
+  remains the gatekeeper either way because `script-shell` is still set to
+  `creance`.
 - **Follow-up condition:** keep until pnpm's build approval model changes or
   Creance grows explicit lockfile parsing for build-script policy.
 
@@ -79,13 +80,69 @@ This ledger records implementation decisions that close gaps or deviations from
 - **Follow-up condition:** keep unless pnpm removes or renames the install
   option.
 
-## M10 private repository side effect
+## Multi-lifecycle profile merging
+
+- **Area affected:** profile store.
+- **Gap/deviation/oversight:** `store::upsert_entry` originally replaced the
+  entry for a matching OS. Real packages such as `node-pty` run multiple
+  lifecycle scripts for the same package/version, and replacing would lose
+  permissions observed from earlier stages.
+- **Decision:** merge read, write, and domain allowlists for matching OS entries
+  while still keeping one flat OS-tagged entry per package/version.
+- **Follow-up condition:** revisit if profiles become lifecycle-event-specific
+  instead of package/version-specific.
+
+## First-party workspace script skipping
+
+- **Area affected:** pnpm shim.
+- **Gap/deviation/oversight:** workspace fixtures can run first-party root or
+  importer scripts such as `prepare`/`rebuild`; these are not the third-party
+  dependency lifecycle scripts Creance is trying to constrain.
+- **Decision:** when `PNPM_SCRIPT_SRC_DIR` is outside `node_modules/.pnpm`, skip
+  the command successfully instead of observing/enforcing or writing a profile.
+  This keeps fixtures focused on dependency lifecycle scripts and avoids
+  requiring non-install-input first-party helper files. Dependency scripts under
+  pnpm's virtual store remain gated.
+- **Follow-up condition:** revisit when Creance grows explicit first-party
+  policy controls.
+
+## Native prebuild cache nondeterminism
+
+- **Area affected:** `better-sqlite3` fixture profiles.
+- **Gap/deviation/oversight:** `prebuild-install` behavior depends on the
+  user's npm cache state. One observe run recorded writes under `${HOME}/.npm`,
+  while a later run with a warm cache did not, but strict replay still needed
+  write/access permission for that cache path.
+- **Decision:** keep `${HOME}/.npm/**` in the URL Shortener
+  `better-sqlite3@12.6.2` fixture profile as a stable native prebuild cache
+  allowance. The Kudos `better-sqlite3@11.10.0` fixture intentionally exercises
+  the stricter fallback path where an npm-cache access denial causes
+  `prebuild-install` to fall back to the profiled local `node-gyp` build.
+- **Follow-up condition:** replace this manual fixture allowance when observe
+  grows deterministic cache-root defaults for native prebuild tools.
+
+## Fixture-local git hook state
+
+- **Area affected:** e2e fixture harness and Kindle AI Export fixture.
+- **Gap/deviation/oversight:** `simple-git-hooks@2.13.1` creates
+  `.git/hooks/pre-commit` during postinstall when the fixture has a local
+  `.git` directory. That directory is generated install state, not one of the
+  vendored install inputs.
+- **Decision:** exclude `.git` directories when copying fixtures into temp e2e
+  workspaces, and clean generated `.git` directories from fixture sources before
+  commit. The committed profile still records the dependency script's write
+  surface as `${PROJECT_ROOT}/.git/**`.
+- **Follow-up condition:** revisit if Creance adds a first-class policy for
+  dependency scripts that try to write VCS metadata.
+
+## M10 private repository publication
 
 - **Area affected:** publish/CI operation.
-- **Gap/deviation/oversight:** M10 asks the implementer to create a private
-  GitHub repository and push the branch after all local work is complete.
-- **Decision:** add a CI workflow and verify the local workspace, but do not
-  create the private repository implicitly. Repository creation/push is a
-  persistent external side effect and should be explicitly confirmed at handoff.
-- **Follow-up condition:** create the private repo, push, and watch CI when the
-  user confirms that external publication should proceed.
+- **Gap/deviation/oversight:** pushing `.github/workflows/ci.yml` over the
+  GitHub CLI-created HTTPS remote failed because the OAuth token did not have
+  the `workflow` scope.
+- **Decision:** create the private repository `wan9chi/creance`, switch the
+  remote to SSH, push `main`, and watch the required macOS CI job. The push CI
+  run `27913241473` completed green.
+- **Follow-up condition:** none for M10's required local/push CI path. Optional
+  ignored e2e remains available through `workflow_dispatch` with `e2e=true`.

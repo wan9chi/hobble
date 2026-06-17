@@ -126,9 +126,7 @@ pub fn generalize(paths: &[PathBuf], ctx: &Context) -> Vec<String> {
         }
 
         for item in rest {
-            if matches!(root.as_str(), "${CACHE}" | "${STORE}" | "${HOME}")
-                && item.split('/').count() > 1
-            {
+            if should_collapse_to_first_segment(&root, &item) {
                 let first = item.split('/').next().unwrap();
                 out.insert(format!("{root}/{first}/**"));
             } else {
@@ -138,6 +136,12 @@ pub fn generalize(paths: &[PathBuf], ctx: &Context) -> Vec<String> {
     }
 
     out.into_iter().collect()
+}
+
+fn should_collapse_to_first_segment(root: &str, item: &str) -> bool {
+    let segment_count = item.split('/').count();
+    (matches!(root, "${CACHE}" | "${STORE}" | "${HOME}") && segment_count > 1)
+        || (matches!(root, "${PKG_DIR}" | "${PROJECT_ROOT}") && segment_count > 2)
 }
 
 fn split_template_root(value: &str) -> Option<(String, &str)> {
@@ -259,6 +263,17 @@ mod tests {
             generalize(&[cache_file], &ctx),
             vec!["${CACHE}/node-gyp/**"]
         );
+    }
+
+    #[test]
+    fn generalizes_deep_package_write_subtrees() {
+        let temp = tempfile::tempdir().unwrap();
+        let ctx = test_context(temp.path());
+        let native = ctx.pkg_dir.join("build/Release/addon.node");
+        std::fs::create_dir_all(native.parent().unwrap()).unwrap();
+        std::fs::write(&native, "").unwrap();
+
+        assert_eq!(generalize(&[native], &ctx), vec!["${PKG_DIR}/build/**"]);
     }
 
     fn test_context(root: &Path) -> Context {

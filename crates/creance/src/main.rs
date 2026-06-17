@@ -7,7 +7,8 @@ use std::{
 
 use anyhow::{Context as _, Result, anyhow};
 use creance_engine::{
-    Context, Decision, Mode, PackageId, Profile, decide, enforce, observe, store, synthesize,
+    Context, Decision, Mode, PackageId, Profile, decide, enforce, observe,
+    sandbox_profile_json_for_entry, store, synthesize,
 };
 
 #[tokio::main]
@@ -46,6 +47,7 @@ async fn run() -> Result<u8> {
             let (strict, pnpm_args) = split_strict(args);
             run_pnpm(PnpmMode::Enforce, strict, pnpm_args)
         }
+        "sandbox-json" => run_sandbox_json(args),
         "--version" | "-V" => {
             println!("creance {}", env!("CARGO_PKG_VERSION"));
             Ok(0)
@@ -54,11 +56,57 @@ async fn run() -> Result<u8> {
     }
 }
 
+fn run_sandbox_json(mut args: Vec<OsString>) -> Result<u8> {
+    if args.len() < 4 || args.len() > 5 {
+        return Err(anyhow!(
+            "usage: creance sandbox-json <creance-dir> <package> <version> <os> [out]"
+        ));
+    }
+
+    let creance_dir = PathBuf::from(args.remove(0));
+    let package = args
+        .remove(0)
+        .into_string()
+        .map_err(|_| anyhow!("package is not utf-8"))?;
+    let version = args
+        .remove(0)
+        .into_string()
+        .map_err(|_| anyhow!("version is not utf-8"))?;
+    let os = args
+        .remove(0)
+        .into_string()
+        .map_err(|_| anyhow!("os is not utf-8"))?;
+    let profile = store::load(&creance_dir, &package, &version)?
+        .ok_or_else(|| anyhow!("no profile for {package}@{version}"))?;
+    let entry = profile
+        .entries
+        .iter()
+        .find(|entry| entry.os.iter().any(|entry_os| entry_os == &os))
+        .ok_or_else(|| anyhow!("no {os} entry for {package}@{version}"))?;
+    let json = serde_json::to_vec_pretty(&sandbox_profile_json_for_entry(entry))?;
+
+    if let Some(out) = args.first() {
+        let out = PathBuf::from(out);
+        if let Some(parent) = out.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("create {}", parent.display()))?;
+        }
+        std::fs::write(&out, json).with_context(|| format!("write {}", out.display()))?;
+    } else {
+        println!("{}", String::from_utf8(json)?);
+    }
+    Ok(0)
+}
+
 async fn run_shim(command: OsString) -> Result<u8> {
     let package = package_from_env()?;
     let creance_dir = PathBuf::from(env::var_os("CREANCE_DIR").context("CREANCE_DIR is not set")?);
     let ctx = context_from_env(&package)?;
     let cwd = env::current_dir().context("read current directory")?;
+    if !is_dependency_script(&ctx.pkg_dir) {
+        return Ok(0);
+    }
+
     let argv = vec![OsString::from("/bin/sh"), OsString::from("-c"), command];
     let env = env::vars_os().collect::<Vec<_>>();
     let lifecycle = env::var("npm_lifecycle_event").unwrap_or_else(|_| "install".to_string());
@@ -88,6 +136,15 @@ async fn run_shim(command: OsString) -> Result<u8> {
         }
         other => Err(anyhow!("unsupported CREANCE_MODE {other:?}")),
     }
+}
+
+fn is_dependency_script(pkg_dir: &Path) -> bool {
+    pkg_dir
+        .components()
+        .any(|component| component.as_os_str() == ".pnpm")
+        && pkg_dir
+            .components()
+            .any(|component| component.as_os_str() == "node_modules")
 }
 
 async fn observe_and_save(
@@ -148,8 +205,12 @@ fn run_pnpm(mode: PnpmMode, strict: bool, user_args: Vec<OsString>) -> Result<u8
 }
 
 fn should_pass_allow_all_builds(cwd: &Path) -> bool {
-    !std::fs::read_to_string(cwd.join("pnpm-lock.yaml"))
-        .is_ok_and(|lockfile| lockfile.contains("onlyBuiltDependencies:"))
+    !["pnpm-lock.yaml", "pnpm-workspace.yaml", "package.json"]
+        .into_iter()
+        .any(|file| {
+            std::fs::read_to_string(cwd.join(file))
+                .is_ok_and(|contents| contents.contains("onlyBuiltDependencies"))
+        })
 }
 
 fn split_strict(args: Vec<OsString>) -> (bool, Vec<OsString>) {
