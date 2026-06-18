@@ -1,0 +1,20 @@
+publicHoistPattern:
+  - '@angular-devkit/*'
+
+peerDependencyRules:
+  ignoreMissing:
+    - '@angular-devkit/*'
+  allowedVersions:
+    chokidar: '4'
+
+ignoredBuiltDependencies:
+  - '@compodoc/compodoc'
+  - '@scarf/scarf'
+  - core-js
+
+onlyBuiltDependencies:
+  - '@parcel/watcher'
+  - esbuild
+  - nice-napi
+  - lmdb
+  - msgpackr-extract

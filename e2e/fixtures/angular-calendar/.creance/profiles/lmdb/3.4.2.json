@@ -1,0 +1,38 @@
+{
+  "package": {
+    "name": "lmdb",
+    "version": "3.4.2"
+  },
+  "creance": "0.1.0",
+  "lifecycle": "install",
+  "entries": [
+    {
+      "os": [
+        "darwin"
+      ],
+      "read": [
+        "${HOME}/**",
+        "${PKG_DIR}",
+        "${PKG_DIR}/**",
+        "${PROJECT_ROOT}",
+        "${PROJECT_ROOT}/**",
+        "/",
+        "/Volumes",
+        "/Volumes/d",
+        "/Volumes/d/code",
+        "/Volumes/d/code/creance",
+        "/Volumes/d/code/creance/e2e",
+        "/Volumes/d/code/creance/e2e/fixtures",
+        "/private/var/db/timezone/tz/2026b.1.0/zoneinfo/Asia/Shanghai",
+        "/private/var/folders/jc/n8npg0fn7hq90304q0pj30z00000gn/T/fspy/dirname",
+        "/private/var/folders/jc/n8npg0fn7hq90304q0pj30z00000gn/T/fspy/locales/dirname",
+        "/private/var/folders/jc/n8npg0fn7hq90304q0pj30z00000gn/T/fspy/locales/uname",
+        "/private/var/folders/jc/n8npg0fn7hq90304q0pj30z00000gn/T/fspy/uname",
+        "/private/var/folders/jc/n8npg0fn7hq90304q0pj30z00000gn/T/share/locales/dirname",
+        "/private/var/folders/jc/n8npg0fn7hq90304q0pj30z00000gn/T/share/locales/uname"
+      ],
+      "write": [],
+      "domains": []
+    }
+  ]
+}
