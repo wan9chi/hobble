@@ -1,0 +1,42 @@
+{
+  "package": {
+    "name": "simple-git-hooks",
+    "version": "2.13.1"
+  },
+  "creance": "0.1.0",
+  "lifecycle": "postinstall",
+  "entries": [
+    {
+      "os": [
+        "darwin"
+      ],
+      "read": [
+        "${HOME}/.vite-plus/**",
+        "${HOME}/Library/**",
+        "${PKG_DIR}",
+        "${PKG_DIR}/node_modules/**",
+        "${PKG_DIR}/package.json",
+        "${PKG_DIR}/postinstall.js",
+        "${PKG_DIR}/simple-git-hooks",
+        "${PKG_DIR}/simple-git-hooks.js",
+        "${PROJECT_ROOT}",
+        "${PROJECT_ROOT}/**",
+        "/",
+        "/Volumes",
+        "/Volumes/d",
+        "/Volumes/d/code",
+        "/Volumes/d/code/creance",
+        "/Volumes/d/code/creance/.git",
+        "/Volumes/d/code/creance/e2e",
+        "/Volumes/d/code/creance/e2e/.git",
+        "/Volumes/d/code/creance/e2e/fixtures",
+        "/Volumes/d/code/creance/e2e/fixtures/.git",
+        "/private/var/db/timezone/tz/2026b.1.0/zoneinfo/Asia/Shanghai"
+      ],
+      "write": [
+        "${PROJECT_ROOT}/.git/**"
+      ],
+      "domains": []
+    }
+  ]
+}
