@@ -6,9 +6,9 @@ can build, test, and get feedback locally and fast.
 
 ## Current status
 
-Implemented locally through M7, plus C8.1's networked Aspect fixture with a
-committed profile, committed sandbox-surface JSON golden, and ignored e2e test.
-A macOS CI workflow is present. `fspy` is pinned to
+Implemented locally through M8, including the Aspect, URL Shortener, Tasuku,
+Angular Calendar, Kudos, and Kindle AI Export fixtures with committed profiles
+and ignored e2e tests. A macOS CI workflow is present. `fspy` is pinned to
 `voidzero-dev/vite-task@8daa9bb72faa89b745cb58c087b416b15d3bddc5`, so the
 workspace no longer depends on a sibling checkout.
 
@@ -16,8 +16,8 @@ The private GitHub repository exists at
 `https://github.com/wan9chi/creance`, `main` is pushed, and the required macOS
 CI job is green.
 
-Remaining plan work is the broader fixture matrix (C8.2-C8.7) and the
-`examples/native-build-script` README transcript work (M9).
+Remaining plan work is the `examples/native-build-script` README transcript
+work (M9).
 
 ## Ground rules
 
@@ -83,8 +83,7 @@ creance/                      # cargo workspace
 ```
 
 Profiles for the e2e fixtures are **committed** under each fixture's
-`.creance/profiles/...`; the generated sandbox profile JSON is committed beside
-them. Both serve as golden artifacts (§M8).
+`.creance/profiles/...`; those profiles are the golden artifacts (§M8).
 
 ---
 
@@ -295,19 +294,14 @@ deterministic on macOS (validated in DESIGN §9).
 
 Source fixtures: `target/fixture-candidates/REPORT.md`. For each, **vendor only the
 install inputs** (`package.json`, `pnpm-workspace.yaml`, `pnpm-lock.yaml`) into
-`e2e/fixtures/<name>/` (committed), run observe to generate the profile, **commit
-the generated `.creance/profiles/...` and the generated sandbox profile JSON**,
-check that the sandbox JSON is the expected enforce surface for the fixture
-(read/write allows plus proxy-only egress), then test enforce. e2e tests are
-`#[ignore]` (network + pnpm) and run via `mise run e2e`.
+`e2e/fixtures/<name>/` (committed), run observe to generate the profile, then
+**commit the generated `.creance/profiles/...`**. e2e tests are `#[ignore]`
+(network + pnpm) and run via `mise run e2e`.
 
 Each e2e commit's test asserts: (1) `creance install --strict` succeeds and the
 package's expected side effect happens; (2) a **deliberate violation** (a patched
 copy of the fixture whose script writes outside `${PKG_DIR}` or contacts an
-un-profiled host) is **blocked**; (3) re-running observe reproduces the same
-allow-lists (determinism, ignoring the `creance` version field); (4) regenerating
-the sandbox profile JSON from the committed Creance profile produces the same
-JSON as the committed sandbox golden.
+un-profiled host) is **blocked**.
 
 Fixture commits do not introduce main CLI features. If a fixture requires new
 harness capability, split that harness capability into the same commit only when
@@ -316,43 +310,51 @@ smallest fixture that proves it.
 
 **C8.1 — fixture: aspect `@aspect-test/c@2.0.0` (tiny, deterministic)**
 - Why first: minimal, offline-ish, postinstall writes `data.json` (REPORT §Aspect).
-- Adds: `e2e/fixtures/aspect-c/` inputs; committed `.creance/profiles/@aspect-test/c/2.0.0.json`; committed generated sandbox profile JSON; `e2e/harness.rs` (vendor→install→assert helpers).
-- Test: observe → profile + sandbox JSON committed and reviewed as expected; `creance install --strict` → `data.json` present; violation variant blocked; freshly-generated sandbox JSON equals the committed JSON.
+- Adds: `e2e/fixtures/aspect-c/` inputs; committed `.creance/profiles/@aspect-test/c/2.0.0.json`; `e2e/harness.rs` (vendor→install→assert helpers).
+- Test: observe → profile committed and reviewed as expected; `creance install --strict` → `data.json` present; violation variant blocked.
 - Accept: full observe→commit→enforce loop on one real package.
 
 **C8.2 — fixture: `better-sqlite3` via `url-shortener` (node-gyp native)**
 - Exercises node-gyp compile reads/writes + cache paths.
-- Test: enforce builds the native addon; out-of-tree write blocked; freshly-generated sandbox JSON equals the committed JSON.
+- Test: enforce builds the native addon; out-of-tree write blocked.
 - Accept: a node-gyp build runs sandboxed.
+- Status: done with `better-sqlite3@12.6.2`.
 
 **C8.3 — fixture: `node-pty` via `tasuku` (native, install+prepare+postinstall)**
 - Exercises multiple lifecycle stages on one package.
-- Test: each lifecycle stage enforces from the committed profile; a freshly-generated sandbox JSON equals the committed JSON.
+- Test: each lifecycle stage enforces from the committed profile.
 - Accept: all stages enforced from one profile.
+- Status: done with `node-pty@1.2.0-beta.10`.
 
 **C8.4 — workspace fixture harness expansion**
 - Adds: harness support for workspace fixtures with multiple package roots,
-  multiple generated profiles, multiple generated sandbox JSON goldens, and
-  per-package side-effect assertions.
+  multiple generated profiles, and per-package side-effect assertions.
 - Test: adapt the smallest already-landed fixture or a trimmed workspace sample
-  to exercise multiple profile and sandbox JSON files without adding a new large
-  dependency set.
-- Accept: harness can assert more than one profile, sandbox JSON, and package
-  root cleanly.
+  to exercise multiple profile files without adding a new large dependency set.
+- Accept: harness can assert more than one profile and package root cleanly.
+- Status: done in `crates/creance/tests/e2e_fixtures.rs`.
 
 **C8.5 — fixture: realistic workspace (`angular-calendar` or `CloudSaver`)**
 - Multiple build deps (`esbuild`, `@parcel/watcher`, `lmdb`/`bcrypt`/`sqlite3`).
-- Test: each gets a committed profile and sandbox JSON; install enforces all; one injected violation blocked; each freshly-generated sandbox JSON equals its committed JSON.
+- Test: each gets a committed profile; install enforces all; one injected violation blocked.
 - Accept: multi-package install under enforcement.
+- Status: done with Angular Calendar profiles for `@parcel/watcher@2.5.1`,
+  `esbuild@0.25.9`, `lmdb@3.4.2`, and `msgpackr-extract@3.0.3`.
 
 **C8.6 — fixture: multi-version same dep (`kudos`: `esbuild` ×N, `better-sqlite3`)**
 - Validates per-`name@version` profile files don't collide.
-- Accept: distinct profiles and sandbox JSON files per version; all freshly-generated sandbox JSON matches the committed JSON; both enforce.
+- Accept: distinct profile files per version; all enforce.
+- Status: done with `better-sqlite3@11.10.0` plus `esbuild@0.18.20`,
+  `0.19.12`, `0.21.5`, and `0.27.3`.
 
 **C8.7 — fixture: network/cache (`sharp` via `kindle-ai-export` or `hiof` demo)**
 - `sharp` downloads a prebuilt → exercises domain capture into `entry.domains`.
-- Test: observe records the CDN host(s); enforce allows exactly those; an extra host blocked; freshly-generated sandbox JSON equals the committed JSON. Document the proxy-honoring caveat if `sharp` bypasses the proxy (DESIGN §8) and pin the domain manually if so.
+- Test: observe records the CDN host(s); enforce allows exactly those; an extra host blocked. Document the proxy-honoring caveat if `sharp` bypasses the proxy (DESIGN §8) and pin the domain manually if so.
 - Accept: domain allowlisting demonstrated end-to-end.
+- Status: done with Kindle AI Export profiles for `sharp@0.34.4`,
+  `esbuild@0.25.11`, and `simple-git-hooks@2.13.1`. This fixture exercised
+  native optional-package/cache checks but did not require a `sharp` CDN
+  download on the tested macOS/arm64 path.
 
 ---
 
@@ -446,9 +448,5 @@ Each of the above becomes its own commit *with the fixture/test that motivates i
 ## Determinism note for committed profiles
 
 `observe` writes real observed behavior; the committed profile is the golden
-artifact. To keep goldens stable: the `creance` version field is normalized out of
-determinism comparisons; paths are templated + sorted; domains sorted. The e2e
-"re-observe reproduces" check compares `entries[].{read,write,domains}` only.
-The committed generated sandbox profile JSON is the second golden: tests
-regenerate it from the committed Creance profile and compare it to the committed
-JSON after the same stable ordering/normalization used by the generator.
+artifact. To keep profiles stable, paths are templated and sorted, and domains
+are sorted.

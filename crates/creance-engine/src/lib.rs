@@ -9,10 +9,7 @@ pub mod synthesize;
 pub mod template;
 
 pub use decision::{Decision, Mode, decide};
-pub use enforce::{
-    SandboxNetworkJson, SandboxProfileJson, enforce, sandbox_profile_for_entry,
-    sandbox_profile_json_for_entry,
-};
+pub use enforce::{enforce, sandbox_profile_for_entry};
 pub use observe::{Observation, observe, observe_fs};
 pub use profile::{Entry, PackageId, Profile};
 pub use synthesize::synthesize;

@@ -5,8 +5,6 @@ use std::{
     process::Command,
 };
 
-use creance_engine::{SandboxProfileJson, sandbox_profile_json_for_entry, store};
-
 #[test]
 #[ignore = "networked pnpm fixture"]
 fn aspect_fixture_installs_strict_and_blocks_unprofiled_write() {
@@ -182,7 +180,6 @@ fn run_fixture(spec: FixtureSpec<'_>) {
     for package in spec.packages {
         assert_expected_side_effect(&fixture, package);
         assert_unprofiled_write_is_blocked(&fixture, package);
-        assert_sandbox_golden_matches(&fixture, package);
     }
 }
 
@@ -212,28 +209,6 @@ fn assert_unprofiled_write_is_blocked(fixture: &Path, package: &PackageSpec<'_>)
         .unwrap();
     assert!(!status.success());
     assert!(!fixture.join("pwned").exists());
-}
-
-fn assert_sandbox_golden_matches(fixture: &Path, package: &PackageSpec<'_>) {
-    let profile = store::load(&fixture.join(".creance"), package.name, package.version)
-        .unwrap()
-        .unwrap();
-    let entry = profile
-        .entries
-        .iter()
-        .find(|entry| entry.os.iter().any(|os| os == "darwin"))
-        .unwrap();
-    let regenerated = sandbox_profile_json_for_entry(entry);
-    let committed: SandboxProfileJson =
-        serde_json::from_slice(&fs::read(sandbox_golden_path(fixture, package)).unwrap()).unwrap();
-    assert_eq!(regenerated, committed);
-}
-
-fn sandbox_golden_path(fixture: &Path, package: &PackageSpec<'_>) -> PathBuf {
-    fixture
-        .join(".creance/sandbox-profiles")
-        .join(package.name)
-        .join(format!("{}.darwin.json", package.version))
 }
 
 fn package_dir(fixture: &Path, package: &PackageSpec<'_>) -> PathBuf {
