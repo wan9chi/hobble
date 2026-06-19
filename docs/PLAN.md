@@ -4,6 +4,21 @@ This plan builds the design in [DESIGN.md](DESIGN.md) as a sequence of **small,
 self-contained, individually verifiable commits**. Scope is **macOS only** so we
 can build, test, and get feedback locally and fast.
 
+## Current status
+
+Implemented locally through M7, plus C8.1's networked Aspect fixture with a
+committed profile, committed sandbox-surface JSON golden, and ignored e2e test.
+A macOS CI workflow is present. `fspy` is pinned to
+`voidzero-dev/vite-task@8daa9bb72faa89b745cb58c087b416b15d3bddc5`, so the
+workspace no longer depends on a sibling checkout.
+
+The private GitHub repository exists at
+`https://github.com/wan9chi/creance`, `main` is pushed, and the required macOS
+CI job is green.
+
+Remaining plan work is the broader fixture matrix (C8.2-C8.7) and the
+`examples/native-build-script` README transcript work (M9).
+
 ## Ground rules
 
 - **macOS only.** All sandbox/proxy/observe code targets macOS. Where a crate
