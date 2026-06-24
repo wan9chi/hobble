@@ -1,0 +1,9 @@
+{
+  "name": "hobble",
+  "version": "0.0.1",
+  "description": "Sandboxing npm lifecycle scripts",
+  "license": "MIT",
+  "files": [
+    "README.md"
+  ]
+}

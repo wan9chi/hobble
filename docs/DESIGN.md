@@ -1,8 +1,8 @@
-# Creance — a pure-Rust sandbox for npm/pnpm lifecycle scripts
+# Hobble — a pure-Rust sandbox for npm/pnpm lifecycle scripts
 
-> *A creance is the long, light line a falconer uses to tether a hawk during
-> training — letting it fly, but never out of control. This tool does the same
-> for the untrusted code that runs during `pnpm install`.*
+> *A hobble is the short strap that lets a grazing animal wander and feed but
+> never bolt or stray far — free to move, never free to run off. This tool does
+> the same for the untrusted code that runs during `pnpm install`.*
 
 ## 1. Problem & goals
 
@@ -22,7 +22,7 @@ malicious update, a time-bomb, a typo-squat — is blocked and surfaced.
 ### Threat model — **supply-chain defense**
 
 A dependency's lifecycle script may be **actively malicious and aware that
-creance is in use**. This drives:
+hobble is in use**. This drives:
 
 1. **Enforcement is deny-by-default and kernel-enforced**, over the whole
    process subtree.
@@ -38,7 +38,7 @@ creance is in use**. This drives:
 
 ### Hard constraints
 
-- **Pure Rust** — a single `creance` binary, no Node/TS runtime or external
+- **Pure Rust** — a single `hobble` binary, no Node/TS runtime or external
   sandbox daemons.
 - **No `sudo`, ever** — for *observation* or *enforcement*, on macOS and Linux.
   Everything runs with ordinary user privileges (see §3.3).
@@ -61,7 +61,7 @@ records the **attempt** pre-syscall (so it logs even paths an outer sandbox
 blocks), follows the whole subtree. macOS: `DYLD_INSERT_LIBRARIES`; Linux glibc:
 `LD_PRELOAD`; Linux static/musl: `seccomp_unotify`. **No `sudo`.** Observer only.
 
-### 2.2 `creance-sandbox` — OS **enforcer** (new crate)
+### 2.2 `hobble-sandbox` — OS **enforcer** (new crate)
 
 Deny-by-default filesystem + "egress only to the proxy", per OS, rootless. The
 **network gate is static and package-agnostic** — the same "only the proxy is
@@ -111,7 +111,7 @@ Applied to the child via `pre_exec` (Linux: `no_new_privs` → Landlock
 parent) or by exec'ing `sandbox-exec` (macOS — avoids `sandbox_init`
 fork-safety issues).
 
-### 2.3 `creance-proxy` — network **brain** (new crate)
+### 2.3 `hobble-proxy` — network **brain** (new crate)
 
 A small **tokio HTTP CONNECT proxy** — the domain-level policy point on *both*
 OSes (the OS layer above just forces traffic here).
@@ -140,9 +140,9 @@ with `npm_package_name`, `npm_package_version`, `npm_lifecycle_event`,
   and make **our shim the fail-closed gatekeeper** instead.
 - Scripts run in parallel (`child-concurrency`, default 5); each is its own shim
   process, so observe and enforce work unchanged at any concurrency.
-- pnpm strips inherited `npm_*` but **not** `CREANCE_*` — so the parent passes
-  the run mode (observe/enforce/strict) + the `.creance` path to the shim via
-  `CREANCE_*` env.
+- pnpm strips inherited `npm_*` but **not** `HOBBLE_*` — so the parent passes
+  the run mode (observe/enforce/strict) + the `.hobble` path to the shim via
+  `HOBBLE_*` env.
 - `.pnpmfile.cjs` `readPackage` **cannot** alter script execution (verified);
   `script-shell` is the one supported chokepoint.
 
@@ -150,26 +150,26 @@ with `npm_package_name`, `npm_package_version`, `npm_lifecycle_event`,
 
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
-│  creance (single Rust binary)                                         │
+│  hobble (single Rust binary)                                         │
 │                                                                        │
-│  entry mode          `creance observe` / `creance install` / …        │
+│  entry mode          `hobble observe` / `hobble install` / …        │
 │    └─ drives pnpm with --config.script-shell=$(self) etc.             │
 │                                                                        │
-│  shim mode           `creance -c "<cmd>"`   (pnpm calls this per script)│
-│    └─ reads CREANCE_* + npm_* env → observe | enforce | refuse        │
+│  shim mode           `hobble -c "<cmd>"`   (pnpm calls this per script)│
+│    └─ reads HOBBLE_* + npm_* env → observe | enforce | refuse        │
 │       (fail-closed) → calls the engine                                 │
 │                                                                        │
 │  Engine (library crates, command-agnostic):                            │
-│    creance-engine    observe() / synthesize() / enforce()             │
+│    hobble-engine    observe() / synthesize() / enforce()             │
 │      ├─ fspy             (FS observation)                              │
-│      ├─ creance-sandbox  (Seatbelt | Landlock+seccomp-unotify)        │
-│      └─ creance-proxy    (CONNECT proxy: domain policy + logging)      │
+│      ├─ hobble-sandbox  (Seatbelt | Landlock+seccomp-unotify)        │
+│      └─ hobble-proxy    (CONNECT proxy: domain policy + logging)      │
 └────────────────────────────────────────────────────────────────────── ┘
 ```
 
 Two decoupled layers:
 
-- **Engine** (`creance-engine` + the three crates above) sandboxes/observes **any
+- **Engine** (`hobble-engine` + the three crates above) sandboxes/observes **any
   command** — reusable beyond pnpm.
 - **CLI/shim** is the pnpm-specific glue.
 
@@ -191,7 +191,7 @@ pub async fn enforce(cmd: &str, p: &Profile, ctx: &EnforceContext) -> Result<Exi
 ### 3.2 How observe composes (one pass, nothing blocked)
 
 ```
-creance-proxy listens on 127.0.0.1:<port>   (allow + log every host)
+hobble-proxy listens on 127.0.0.1:<port>   (allow + log every host)
 
 both OSes:  fspy::Command(sh -c "<cmd>")   with HTTPS_PROXY=127.0.0.1:<port>
               └─ fspy records FS (DYLD / LD_PRELOAD)         no OS sandbox here
@@ -221,7 +221,7 @@ helper, no `sudo` — by construction.
 ### 4.1 Repo layout (committed)
 
 ```
-.creance/
+.hobble/
   profiles/
     esbuild/0.21.5.json
     sharp/0.33.2.json
@@ -258,7 +258,7 @@ is a list, so one entry can cover several identical platforms):
 ```json
 {
   "package": { "name": "esbuild", "version": "0.21.5" },
-  "creance": "0.1.0",
+  "hobble": "0.1.0",
   "lifecycle": ["postinstall"],
   "entries": [
     {
@@ -291,7 +291,7 @@ reads, writes, and even domains differ across OS/arch. Therefore:
   (no union/flattening); enforce uses the entry whose `os` contains the current
   os-arch.
 - A macOS-observed profile is **not** silently trusted on Linux CI: if no entry
-  matches the current platform, `creance install --strict` → fail (re-observe
+  matches the current platform, `hobble install --strict` → fail (re-observe
   required). This makes the "observe on macOS, enforce on Linux CI" gap explicit
   instead of unsound.
 
@@ -307,7 +307,7 @@ script). It needs only **fspy + the proxy in log mode** — no Seatbelt/Landlock
 - **Filesystem — record reads and writes.** fspy captures both, which become the
   entry's `read` / `write` lists (generalized to roots, §6).
 - **Nothing observed is auto-trusted.** The generated profile is a *proposal* that
-  takes effect only once a human reviews the `.creance/` git diff and commits it —
+  takes effect only once a human reviews the `.hobble/` git diff and commits it —
   git review is the approval gate (no separate command).
 - **Controlled `${RUN_TMP}`:** set as `TMPDIR` so "writes to a random temp path"
   generalize to one rule at synthesis time.
@@ -345,7 +345,7 @@ not payload — documented as a residual risk in §8.
 
 | Vector | Mitigation |
 |---|---|
-| **Exfil during observe** | **Accepted by design** — observe is unsandboxed (= the already-unsandboxed first install, §1/§5). Mitigated by: nothing observed is auto-trusted (the profile only takes effect once the `.creance/` diff is reviewed and committed), and untrusted deps should be observed in a disposable env (container/VM/CI). |
+| **Exfil during observe** | **Accepted by design** — observe is unsandboxed (= the already-unsandboxed first install, §1/§5). Mitigated by: nothing observed is auto-trusted (the profile only takes effect once the `.hobble/` diff is reviewed and committed), and untrusted deps should be observed in a disposable env (container/VM/CI). |
 | **Exfil over an allowed write-capable domain** | The egress allowlist is the only exfil control (no payload inspection / MITM), so an allowed write-capable host is a residual exfil channel. |
 | **git-hosted deps run `prepare` in a fetch phase** bypassing the build gate | Detect git/URL deps from the lockfile; `ignore-scripts` on fetch + a controlled sandboxed rebuild; strict mode hard-fails an unprofiled git dep. |
 | **Client ignores `HTTPS_PROXY` and connects directly** | macOS Seatbelt / Linux seccomp-unotify **deny** the direct connect (contained). Such a package fails and is surfaced; it needs an explicit allowance. |
@@ -353,7 +353,7 @@ not payload — documented as a residual risk in §8.
 | **Long-lived daemon outliving install** | Own process group; kill the group on exit/timeout. |
 | **Time-bomb / divergent behaviour at enforce** | Enforce is deny-by-default — divergent actions are blocked. |
 | **Read-allowlist brittleness** (cost, not attack) | A toolchain bump that moves runtime paths breaks reads → re-observe. Mitigated by generalizing reads to coarse roots (§6) and keeping runtime roots in the built-in base. |
-| **Profile poisoning (too-broad commit)** | Human review of the `.creance/` git diff at commit time (git is the integrity record). |
+| **Profile poisoning (too-broad commit)** | Human review of the `.hobble/` git diff at commit time (git is the integrity record). |
 | **Malicious update inherits old profile** | New version → new path → no profile → re-observe/fail; pnpm guarantees a given version is fixed bytes. |
 | **Symlink/canonicalization evasion** | Canonicalize all rules; Seatbelt emits anti-bypass `file-write-unlink/create` denies; Landlock operates on resolved paths. |
 | **seccomp-unotify TOCTOU** on `connect()` | Re-validate via `SECCOMP_IOCTL_NOTIF_ID_VALID`; read `sockaddr` with `process_vm_readv`; on any doubt, deny. |
@@ -385,13 +385,13 @@ Not yet validated: the Linux seccomp-unotify `connect()` supervisor (on
 ## 10. User experience
 
 ```console
-$ creance observe            # learn profiles (unsandboxed run, instrumented)
+$ hobble observe            # learn profiles (unsandboxed run, instrumented)
   ▸ esbuild@0.21.5   postinstall  ✔  1 domain, 2 writes
   ▸ sharp@0.33.2     install      ✔  2 domains, 14 writes
-generated/updated profiles → .creance/
-next:  review the .creance/ git diff, then commit.
+generated/updated profiles → .hobble/
+next:  review the .hobble/ git diff, then commit.
 
-$ creance install            # enforce; drop-in for pnpm install
+$ hobble install            # enforce; drop-in for pnpm install
   ▸ esbuild@0.21.5   postinstall  ✔ sandboxed
   ✗ left-pad@1.3.0   postinstall  BLOCKED: connect api.evil.tld; write ${HOME}/.zshrc
 install failed: left-pad@1.3.0 violated its profile.
@@ -400,20 +400,20 @@ install failed: left-pad@1.3.0 violated its profile.
 - **New/changed dep** (no profile for this version/OS): dev → observe + write the
   profile (review the diff, commit); `--strict` (CI) → **fail**, like a frozen
   lockfile.
-- Two commands: `creance observe` (learn → write profiles, reviewed via git diff)
-  and `creance install` (enforce; drop-in for `pnpm install`).
+- Two commands: `hobble observe` (learn → write profiles, reviewed via git diff)
+  and `hobble install` (enforce; drop-in for `pnpm install`).
 
 ## 11. Implementation plan
 
-- **M1 — `creance-proxy`:** tokio CONNECT proxy; observe (allow + log) and
+- **M1 — `hobble-proxy`:** tokio CONNECT proxy; observe (allow + log) and
   enforce (strict) modes; per-instance binding; logging.
-- **M2 — `creance-sandbox` (macOS):** SBPL generator (base block + FS + egress);
+- **M2 — `hobble-sandbox` (macOS):** SBPL generator (base block + FS + egress);
   `sandbox-exec` runner; profile templating/canonicalization.
-- **M3 — `creance-sandbox` (Linux):** Landlock FS ruleset; **seccomp-unotify
+- **M3 — `hobble-sandbox` (Linux):** Landlock FS ruleset; **seccomp-unotify
   `connect()` supervisor** on `fspy_seccomp_unotify`; `pre_exec` ordering.
-- **M4 — `creance-engine`:** `observe`/`synthesize`/`enforce`; profile schema;
+- **M4 — `hobble-engine`:** `observe`/`synthesize`/`enforce`; profile schema;
   OS-keyed profile lookup.
-- **M5 — `creance` CLI/shim:** entry + `-c` shim dispatch; per-package profile
+- **M5 — `hobble` CLI/shim:** entry + `-c` shim dispatch; per-package profile
   lookup from `npm_package_*`; observe/enforce/refuse decision (fail-closed);
   `--strict`.
 - **M6 — hardening:** git-`prepare` handling; process-group teardown; first-party
