@@ -1,0 +1,6 @@
+[settings]
+lockfile = true
+
+[tools]
+cargo-binstall = "1.17.5"
+"cargo:cargo-autoinherit" = "0.1.6"

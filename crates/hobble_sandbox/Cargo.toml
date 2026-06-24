@@ -1,0 +1,15 @@
+[package]
+name = "hobble_sandbox"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+ctor = "1.0.7"
+
+[dev-dependencies]
+hobble_command_test = { workspace = true }
+uuid = { version = "1.23.3", features = ["v4"] }
