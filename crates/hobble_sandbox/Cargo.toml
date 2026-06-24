@@ -8,8 +8,14 @@ repository.workspace = true
 
 [dependencies]
 anyhow.workspace = true
-ctor = "1.0.7"
+ctor = { workspace = true }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+hobble_sandbox_linux = { workspace = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+hobble_sandbox_macos = { workspace = true }
 
 [dev-dependencies]
 hobble_command_test = { workspace = true }
-uuid = { version = "1.23.3", features = ["v4"] }
+uuid = { workspace = true, features = ["v4"] }

@@ -1,13 +1,11 @@
+#![cfg(target_os = "macos")]
+
 use std::{ffi::OsStr, process::{Child, Command}};
 
-#[cfg(target_os = "macos")]
-use hobble_sandbox_macos as hobble_sandbox_impl;
-
-#[cfg(target_os = "linux")]
-use hobble_sandbox_linux as hobble_sandbox_impl;
-
 #[derive(Default, Debug)]
-pub struct SandboxBuilder(hobble_sandbox_impl::SandboxBuilder);
+pub struct SandboxBuilder {
+
+}
 
 impl SandboxBuilder {
     // Allow a path to be accessed by the sandboxed process.
@@ -15,12 +13,11 @@ impl SandboxBuilder {
     // # Panics
     // Panics if the path is not absolute.
     pub fn allow_path(&mut self, path: &OsStr) -> &mut Self {
-        self.0.allow_path(path);
         self
     }
 
 
     pub fn spawn(self, command: Command) -> Result<Child, anyhow::Error> {
-        self.0.spawn(command)
+        todo!()
     }
 }

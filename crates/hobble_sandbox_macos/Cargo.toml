@@ -1,5 +1,5 @@
 [package]
-name = "hobble_command_test"
+name = "hobble_sandbox_macos"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -7,6 +7,6 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-base64 = { workspace = true }
-ctor = { workspace = true }
-wincode = { workspace = true }
+anyhow.workspace = true
+
+[dev-dependencies]

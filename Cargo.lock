@@ -95,7 +95,23 @@ dependencies = [
  "anyhow",
  "ctor",
  "hobble_command_test",
+ "hobble_sandbox_linux",
+ "hobble_sandbox_macos",
  "uuid",
+]
+
+[[package]]
+name = "hobble_sandbox_linux"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+]
+
+[[package]]
+name = "hobble_sandbox_macos"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
 ]
 
 [[package]]
