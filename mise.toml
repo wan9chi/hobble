@@ -4,3 +4,9 @@ lockfile = true
 [tools]
 cargo-binstall = "1.17.5"
 "cargo:cargo-autoinherit" = "0.1.6"
+"cargo:cargo-zigbuild" = "0.23.0"
+zig = "0.15.2"
+
+[tasks.test-linux-arm64]
+description = "Build hobble_sandbox tests for Linux arm64 and run them in Docker/Colima"
+run = 'CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUNNER="docker run --rm --platform linux/arm64 --mount type=bind,source=$PWD,target=$PWD -w $PWD debian:bookworm" cargo-zigbuild test'
