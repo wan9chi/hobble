@@ -1,5 +1,5 @@
 [package]
-name = "creance-proxy"
+name = "hobble"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -7,7 +7,5 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-thiserror.workspace = true
+anyhow.workspace = true
 tokio.workspace = true
-tokio-util.workspace = true
-tracing.workspace = true
