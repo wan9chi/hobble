@@ -8,3 +8,6 @@ repository.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+landlock.workspace = true
