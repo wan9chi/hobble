@@ -1,7 +1,7 @@
 #![cfg(target_os = "macos")]
 
 use std::{
-    ffi::{CString, OsStr},
+    ffi::{CStr, CString, OsStr},
     io,
     os::{
         raw::{c_char, c_int},
@@ -22,6 +22,8 @@ unsafe extern "C" {
         parameters: *const *const c_char,
         errorbuf: *mut *mut c_char,
     ) -> c_int;
+
+    fn sandbox_free_error(errorbuf: *mut c_char);
 }
 
 #[derive(Debug)]
@@ -78,7 +80,7 @@ impl SandboxBuilder {
         unsafe {
             command.pre_exec(move || {
                 let _keep_parameters_alive = &sandbox.1;
-                apply_sandbox(&sandbox.0, &sandbox.2)
+                apply_sandbox(&sandbox.0, &sandbox.2).map_err(io::Error::other)
             });
         }
 
@@ -117,7 +119,7 @@ impl SandboxBuilder {
     }
 }
 
-fn apply_sandbox(profile: &CString, parameter_ptrs: &[usize]) -> io::Result<()> {
+fn apply_sandbox(profile: &CString, parameter_ptrs: &[usize]) -> Result<()> {
     let mut errorbuf = ptr::null_mut();
     let result = unsafe {
         sandbox_init_with_parameters(
@@ -131,7 +133,16 @@ fn apply_sandbox(profile: &CString, parameter_ptrs: &[usize]) -> io::Result<()> 
     if result == 0 {
         Ok(())
     } else {
-        Err(io::Error::other("sandbox_init_with_parameters failed"))
+        let message = if errorbuf.is_null() {
+            "sandbox_init_with_parameters failed".to_string()
+        } else {
+            let message = unsafe { CStr::from_ptr(errorbuf) }
+                .to_string_lossy()
+                .into_owned();
+            unsafe { sandbox_free_error(errorbuf) };
+            format!("sandbox_init_with_parameters failed: {message}")
+        };
+        anyhow::bail!(message)
     }
 }
 
