@@ -71,35 +71,12 @@ impl PreparedSandbox {
     fn new(allowed_paths: &[PathBuf], executable_path: Option<&Path>) -> Result<Self> {
         let mut profile = String::from(
             r#"(version 1)
-(allow default)
 (deny file-read* file-write*)
-(allow file-read-metadata)
 (import "system.sb")
 "#,
         );
 
         let mut parameters = Vec::new();
-
-        if let Some(home) = env::var_os("HOME") {
-            let home = PathBuf::from(home);
-            push_parameter(
-                &mut parameters,
-                "hobble_home_text_encoding",
-                &home.join(".CFUserTextEncoding"),
-            )?;
-            push_parameter(
-                &mut parameters,
-                "hobble_home_preferences",
-                &home.join("Library").join("Preferences"),
-            )?;
-            profile.push_str(
-                r#"
-(allow file-read*
-    (literal (param "hobble_home_text_encoding"))
-    (subpath (param "hobble_home_preferences")))
-"#,
-            );
-        }
 
         if let Some(executable_path) = executable_path {
             let name = "hobble_executable";
@@ -110,24 +87,6 @@ impl PreparedSandbox {
     (literal (param "hobble_executable")))
 "#,
             );
-
-            if let Some(parent) = executable_path.parent() {
-                let name = "hobble_executable_dir";
-                push_parameter(&mut parameters, name, parent)?;
-                profile.push_str(
-                    r#"
-(allow file-read* file-map-executable
-    (subpath (param "hobble_executable_dir")))
-"#,
-                );
-            } else {
-                profile.push_str(
-                    r#"
-(allow file-read* file-map-executable
-    (literal (param "hobble_executable")))
-"#,
-                );
-            }
         }
 
         for (idx, path) in allowed_paths.iter().enumerate() {
