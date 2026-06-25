@@ -25,7 +25,7 @@ fn allow_path() {
     fs::create_dir(&allowed_dir).unwrap();
     fs::write(&disallowed_path, b"disallowed").unwrap();
 
-    builder.allow_path(allowed_dir.as_os_str());
+    builder.allow_path(allowed_dir.as_os_str()).unwrap();
 
     let allowed_missing_path = allowed_dir.join("missing");
     let child_paths = format!(

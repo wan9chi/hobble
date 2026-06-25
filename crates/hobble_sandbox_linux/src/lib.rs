@@ -17,19 +17,41 @@ use landlock::{
 
 #[derive(Default, Debug)]
 pub struct SandboxBuilder {
-    allowed_paths: Vec<PathBuf>,
+    allowed_paths: Vec<AllowedPath>,
+}
+
+#[derive(Debug)]
+struct AllowedPath {
+    path: PathBuf,
+    kind: AllowedPathKind,
+}
+
+#[derive(Debug)]
+enum AllowedPathKind {
+    Directory,
+    File,
 }
 
 impl SandboxBuilder {
     // Allow a path to be accessed by the sandboxed process.
     // If the path is a directory, all files and directories under it will be allowed.
-    // # Panics
-    // Panics if the path is not absolute.
-    pub fn allow_path(&mut self, path: &OsStr) -> &mut Self {
+    pub fn allow_path(&mut self, path: &OsStr) -> Result<&mut Self> {
         let path = Path::new(path);
-        assert!(path.is_absolute(), "sandbox paths must be absolute");
-        self.allowed_paths.push(path.to_path_buf());
-        self
+        anyhow::ensure!(path.is_absolute(), "sandbox paths must be absolute");
+
+        let metadata = fs::metadata(path)
+            .with_context(|| format!("failed to inspect sandbox path {}", path.display()))?;
+        let kind = if metadata.is_dir() {
+            AllowedPathKind::Directory
+        } else {
+            AllowedPathKind::File
+        };
+
+        self.allowed_paths.push(AllowedPath {
+            path: path.to_path_buf(),
+            kind,
+        });
+        Ok(self)
     }
 
     pub fn spawn(self, mut command: Command) -> Result<Child, anyhow::Error> {
@@ -55,7 +77,7 @@ impl SandboxBuilder {
 }
 
 fn build_ruleset(
-    allowed_paths: &[PathBuf],
+    allowed_paths: &[AllowedPath],
     executable_path: Option<&Path>,
 ) -> Result<RulesetCreated> {
     let abi = ABI::V1;
@@ -96,17 +118,26 @@ fn build_ruleset(
     }
 
     for path in allowed_paths {
-        ruleset = add_path_rule(
-            ruleset,
-            path,
-            read_write_dir_access,
-            read_write_file_access,
-            true,
-        )
-        .with_context(|| format!("failed to allow sandbox path {}", path.display()))?;
+        ruleset =
+            add_allowed_path_rule(ruleset, path, read_write_dir_access, read_write_file_access)
+                .with_context(|| format!("failed to allow sandbox path {}", path.path.display()))?;
     }
 
     Ok(ruleset)
+}
+
+fn add_allowed_path_rule(
+    ruleset: RulesetCreated,
+    path: &AllowedPath,
+    dir_access: BitFlags<AccessFs>,
+    file_access: BitFlags<AccessFs>,
+) -> Result<RulesetCreated> {
+    let access = match path.kind {
+        AllowedPathKind::Directory => dir_access,
+        AllowedPathKind::File => file_access,
+    };
+    let path_fd = PathFd::new(&path.path)?;
+    Ok(ruleset.add_rule(PathBeneath::new(path_fd, access))?)
 }
 
 fn add_path_rule(

@@ -3,7 +3,7 @@
 use std::{
     env,
     ffi::{CString, OsStr, OsString},
-    io,
+    fs, io,
     os::{
         raw::{c_char, c_int},
         unix::{ffi::OsStrExt, process::CommandExt},
@@ -25,123 +25,157 @@ unsafe extern "C" {
     ) -> c_int;
 }
 
-#[derive(Default, Debug)]
+#[derive(Debug)]
 pub struct SandboxBuilder {
-    allowed_paths: Vec<PathBuf>,
+    profile: String,
+    parameters: String,
+    next_parameter_id: usize,
+}
+
+impl Default for SandboxBuilder {
+    fn default() -> Self {
+        Self {
+            profile: String::from(
+                r#"(version 1)
+(deny file-read* file-write*)
+(import "system.sb")
+"#,
+            ),
+            parameters: String::new(),
+            next_parameter_id: 0,
+        }
+    }
 }
 
 impl SandboxBuilder {
     // Allow a path to be accessed by the sandboxed process.
     // If the path is a directory, all files and directories under it will be allowed.
-    // # Panics
-    // Panics if the path is not absolute.
-    pub fn allow_path(&mut self, path: &OsStr) -> &mut Self {
+    pub fn allow_path(&mut self, path: &OsStr) -> Result<&mut Self> {
         let path = Path::new(path);
-        assert!(path.is_absolute(), "sandbox paths must be absolute");
-        self.allowed_paths.push(path.to_path_buf());
-        self
+        anyhow::ensure!(path.is_absolute(), "sandbox paths must be absolute");
+
+        let metadata = fs::metadata(path)
+            .with_context(|| format!("failed to inspect sandbox path {}", path.display()))?;
+        let filter = if metadata.is_dir() {
+            "subpath"
+        } else {
+            "literal"
+        };
+        let name = self.push_path_parameter("hobble_allow", path)?;
+
+        self.profile.push_str(&format!(
+            "(allow file-read* file-write* ({filter} (param \"{name}\")))\n"
+        ));
+
+        Ok(self)
     }
 
-    pub fn spawn(self, mut command: Command) -> Result<Child, anyhow::Error> {
+    pub fn spawn(mut self, mut command: Command) -> Result<Child, anyhow::Error> {
         let executable_path = resolve_program_path(&command);
-        let sandbox = PreparedSandbox::new(&self.allowed_paths, executable_path.as_deref())?;
+        if let Some(executable_path) = executable_path {
+            self.allow_command_executable(&executable_path)?;
+        }
+
+        let profile = CString::new(self.profile).context("sandbox profile contains a null byte")?;
+        let parameter_strings = parameter_cstrings(&self.parameters)?;
+        let mut parameter_ptrs = parameter_strings
+            .iter()
+            .map(|parameter| parameter.as_ptr() as usize)
+            .collect::<Vec<_>>();
+        parameter_ptrs.push(ptr::null::<c_char>() as usize);
+        let sandbox = (profile, parameter_strings, parameter_ptrs);
 
         // SAFETY: The closure only uses data prepared before fork and calls the
         // platform sandbox entry point in the child before exec.
         unsafe {
-            command.pre_exec(move || sandbox.apply());
+            command.pre_exec(move || {
+                let _keep_parameters_alive = &sandbox.1;
+                apply_sandbox(&sandbox.0, &sandbox.2)
+            });
         }
 
         command
             .spawn()
             .context("failed to spawn command with macOS sandbox")
     }
-}
 
-#[derive(Debug)]
-struct PreparedSandbox {
-    profile: CString,
-    // Owns the name/value C strings referenced by `parameter_ptrs`. These are
-    // passed to sandbox_init_with_parameters, not through the child environment.
-    _parameter_strings: Vec<CString>,
-    parameter_ptrs: Vec<usize>,
-}
+    fn allow_command_executable(&mut self, executable_path: &Path) -> Result<()> {
+        let name = self.push_path_parameter("hobble_executable", executable_path)?;
+        self.profile.push_str(&format!(
+            "(allow process-exec* (literal (param \"{name}\")))\n"
+        ));
+        Ok(())
+    }
 
-impl PreparedSandbox {
-    fn new(allowed_paths: &[PathBuf], executable_path: Option<&Path>) -> Result<Self> {
-        let mut profile = String::from(
-            r#"(version 1)
-(deny file-read* file-write*)
-(import "system.sb")
-"#,
+    fn push_path_parameter(&mut self, prefix: &str, path: &Path) -> Result<String> {
+        let name = format!("{prefix}_{}", self.next_parameter_id);
+        self.next_parameter_id += 1;
+        let value = path
+            .to_str()
+            .with_context(|| format!("sandbox path is not valid UTF-8: {}", path.display()))?
+            .to_owned();
+        self.push_parameter(&name, &value)?;
+        Ok(name)
+    }
+
+    fn push_parameter(&mut self, name: &str, value: &str) -> Result<()> {
+        anyhow::ensure!(!name.is_empty(), "sandbox parameter name must not be empty");
+        anyhow::ensure!(
+            !name.contains('\0'),
+            "sandbox parameter name contains a null byte"
+        );
+        anyhow::ensure!(
+            !value.contains('\0'),
+            "sandbox parameter value contains a null byte"
         );
 
-        let mut parameters = Vec::new();
-
-        if let Some(executable_path) = executable_path {
-            let name = "hobble_executable";
-            push_parameter(&mut parameters, name, executable_path)?;
-            profile.push_str(
-                r#"
-(allow process-exec*
-    (literal (param "hobble_executable")))
-"#,
-            );
-        }
-
-        for (idx, path) in allowed_paths.iter().enumerate() {
-            let name = format!("hobble_allow_{idx}");
-            push_parameter(&mut parameters, &name, path)?;
-
-            let filter = if path.is_dir() { "subpath" } else { "literal" };
-            profile.push_str(&format!(
-                r#"
-(allow file-read* file-write*
-    ({filter} (param "{name}")))
-"#
-            ));
-        }
-
-        let profile = CString::new(profile).context("sandbox profile contains a null byte")?;
-        let mut parameter_ptrs = parameters
-            .iter()
-            .map(|parameter| parameter.as_ptr() as usize)
-            .collect::<Vec<_>>();
-        parameter_ptrs.push(ptr::null::<c_char>() as usize);
-
-        Ok(Self {
-            profile,
-            _parameter_strings: parameters,
-            parameter_ptrs,
-        })
-    }
-
-    fn apply(&self) -> io::Result<()> {
-        let mut errorbuf = ptr::null_mut();
-        let result = unsafe {
-            sandbox_init_with_parameters(
-                self.profile.as_ptr(),
-                0,
-                self.parameter_ptrs.as_ptr().cast::<*const c_char>(),
-                &mut errorbuf,
-            )
-        };
-
-        if result == 0 {
-            Ok(())
-        } else {
-            Err(io::Error::other("sandbox_init_with_parameters failed"))
-        }
+        self.parameters.push_str(name);
+        self.parameters.push('\0');
+        self.parameters.push_str(value);
+        self.parameters.push('\0');
+        Ok(())
     }
 }
 
-fn push_parameter(parameters: &mut Vec<CString>, name: &str, path: &Path) -> Result<()> {
-    parameters.push(CString::new(name).context("sandbox parameter name contains a null byte")?);
-    parameters.push(
-        CString::new(path.as_os_str().as_bytes())
-            .with_context(|| format!("sandbox path contains a null byte: {}", path.display()))?,
+fn apply_sandbox(profile: &CString, parameter_ptrs: &[usize]) -> io::Result<()> {
+    let mut errorbuf = ptr::null_mut();
+    let result = unsafe {
+        sandbox_init_with_parameters(
+            profile.as_ptr(),
+            0,
+            parameter_ptrs.as_ptr().cast::<*const c_char>(),
+            &mut errorbuf,
+        )
+    };
+
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::other("sandbox_init_with_parameters failed"))
+    }
+}
+
+fn parameter_cstrings(parameters: &str) -> Result<Vec<CString>> {
+    if parameters.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let parameters = parameters
+        .strip_suffix('\0')
+        .context("sandbox parameter buffer is missing a null terminator")?;
+    let mut cstrings = Vec::new();
+    for parameter in parameters.split('\0') {
+        anyhow::ensure!(
+            !parameter.is_empty(),
+            "sandbox parameter buffer contains an empty segment"
+        );
+        cstrings.push(CString::new(parameter).context("sandbox parameter contains a null byte")?);
+    }
+    anyhow::ensure!(
+        cstrings.len() % 2 == 0,
+        "sandbox parameter buffer must contain name/value pairs"
     );
-    Ok(())
+    Ok(cstrings)
 }
 
 fn resolve_program_path(command: &Command) -> Option<PathBuf> {
