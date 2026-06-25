@@ -61,7 +61,9 @@ impl SandboxBuilder {
 #[derive(Debug)]
 struct PreparedSandbox {
     profile: CString,
-    _parameters: Vec<CString>,
+    // Owns the name/value C strings referenced by `parameter_ptrs`. These are
+    // passed to sandbox_init_with_parameters, not through the child environment.
+    _parameter_strings: Vec<CString>,
     parameter_ptrs: Vec<usize>,
 }
 
@@ -82,54 +84,54 @@ impl PreparedSandbox {
             let home = PathBuf::from(home);
             push_parameter(
                 &mut parameters,
-                "_HOBBLE_HOME_TEXT_ENCODING",
+                "hobble_home_text_encoding",
                 &home.join(".CFUserTextEncoding"),
             )?;
             push_parameter(
                 &mut parameters,
-                "_HOBBLE_HOME_PREFERENCES",
+                "hobble_home_preferences",
                 &home.join("Library").join("Preferences"),
             )?;
             profile.push_str(
                 r#"
 (allow file-read*
-    (literal (param "_HOBBLE_HOME_TEXT_ENCODING"))
-    (subpath (param "_HOBBLE_HOME_PREFERENCES")))
+    (literal (param "hobble_home_text_encoding"))
+    (subpath (param "hobble_home_preferences")))
 "#,
             );
         }
 
         if let Some(executable_path) = executable_path {
-            let name = "_HOBBLE_EXECUTABLE";
+            let name = "hobble_executable";
             push_parameter(&mut parameters, name, executable_path)?;
             profile.push_str(
                 r#"
 (allow process-exec*
-    (literal (param "_HOBBLE_EXECUTABLE")))
+    (literal (param "hobble_executable")))
 "#,
             );
 
             if let Some(parent) = executable_path.parent() {
-                let name = "_HOBBLE_EXECUTABLE_DIR";
+                let name = "hobble_executable_dir";
                 push_parameter(&mut parameters, name, parent)?;
                 profile.push_str(
                     r#"
 (allow file-read* file-map-executable
-    (subpath (param "_HOBBLE_EXECUTABLE_DIR")))
+    (subpath (param "hobble_executable_dir")))
 "#,
                 );
             } else {
                 profile.push_str(
                     r#"
 (allow file-read* file-map-executable
-    (literal (param "_HOBBLE_EXECUTABLE")))
+    (literal (param "hobble_executable")))
 "#,
                 );
             }
         }
 
         for (idx, path) in allowed_paths.iter().enumerate() {
-            let name = format!("_HOBBLE_ALLOW_{idx}");
+            let name = format!("hobble_allow_{idx}");
             push_parameter(&mut parameters, &name, path)?;
 
             let filter = if path.is_dir() { "subpath" } else { "literal" };
@@ -150,7 +152,7 @@ impl PreparedSandbox {
 
         Ok(Self {
             profile,
-            _parameters: parameters,
+            _parameter_strings: parameters,
             parameter_ptrs,
         })
     }
