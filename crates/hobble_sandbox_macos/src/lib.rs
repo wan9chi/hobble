@@ -1,14 +1,13 @@
 #![cfg(target_os = "macos")]
 
 use std::{
-    env,
-    ffi::{CString, OsStr, OsString},
-    fs, io,
+    ffi::{CString, OsStr},
+    io,
     os::{
         raw::{c_char, c_int},
-        unix::{ffi::OsStrExt, process::CommandExt},
+        unix::process::CommandExt,
     },
-    path::{Path, PathBuf},
+    path::Path,
     process::{Child, Command},
     ptr,
 };
@@ -37,6 +36,7 @@ impl Default for SandboxBuilder {
         Self {
             profile: String::from(
                 r#"(version 1)
+(allow process-exec*)
 (deny file-read* file-write*)
 (import "system.sb")
 "#,
@@ -54,28 +54,16 @@ impl SandboxBuilder {
         let path = Path::new(path);
         anyhow::ensure!(path.is_absolute(), "sandbox paths must be absolute");
 
-        let metadata = fs::metadata(path)
-            .with_context(|| format!("failed to inspect sandbox path {}", path.display()))?;
-        let filter = if metadata.is_dir() {
-            "subpath"
-        } else {
-            "literal"
-        };
         let name = self.push_path_parameter("hobble_allow", path)?;
 
         self.profile.push_str(&format!(
-            "(allow file-read* file-write* ({filter} (param \"{name}\")))\n"
+            "(allow file-read* file-write* (subpath (param \"{name}\")))\n"
         ));
 
         Ok(self)
     }
 
-    pub fn spawn(mut self, mut command: Command) -> Result<Child, anyhow::Error> {
-        let executable_path = resolve_program_path(&command);
-        if let Some(executable_path) = executable_path {
-            self.allow_command_executable(&executable_path)?;
-        }
-
+    pub fn spawn(self, mut command: Command) -> Result<Child, anyhow::Error> {
         let profile = CString::new(self.profile).context("sandbox profile contains a null byte")?;
         let parameter_strings = parameter_cstrings(&self.parameters)?;
         let mut parameter_ptrs = parameter_strings
@@ -97,14 +85,6 @@ impl SandboxBuilder {
         command
             .spawn()
             .context("failed to spawn command with macOS sandbox")
-    }
-
-    fn allow_command_executable(&mut self, executable_path: &Path) -> Result<()> {
-        let name = self.push_path_parameter("hobble_executable", executable_path)?;
-        self.profile.push_str(&format!(
-            "(allow process-exec* (literal (param \"{name}\")))\n"
-        ));
-        Ok(())
     }
 
     fn push_path_parameter(&mut self, prefix: &str, path: &Path) -> Result<String> {
@@ -176,34 +156,4 @@ fn parameter_cstrings(parameters: &str) -> Result<Vec<CString>> {
         "sandbox parameter buffer must contain name/value pairs"
     );
     Ok(cstrings)
-}
-
-fn resolve_program_path(command: &Command) -> Option<PathBuf> {
-    let program = Path::new(command.get_program());
-    if program.is_absolute() {
-        return Some(program.to_path_buf());
-    }
-
-    if program.as_os_str().as_bytes().contains(&b'/') {
-        let base = command
-            .get_current_dir()
-            .map(Path::to_path_buf)
-            .or_else(|| env::current_dir().ok())?;
-        return Some(base.join(program));
-    }
-
-    let path = command_path_env(command)?;
-    env::split_paths(&path)
-        .map(|path_dir| path_dir.join(program))
-        .find(|candidate| candidate.exists())
-}
-
-fn command_path_env(command: &Command) -> Option<OsString> {
-    let mut path = env::var_os("PATH");
-    for (key, value) in command.get_envs() {
-        if key == OsStr::new("PATH") {
-            path = value.map(OsString::from);
-        }
-    }
-    path
 }
