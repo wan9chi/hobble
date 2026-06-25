@@ -95,6 +95,7 @@ fn push_path_parameter(
     );
     let name = format!("{prefix}_{}", *next_parameter_id);
     *next_parameter_id += 1;
+    let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
     let value = path
         .to_str()
         .with_context(|| format!("sandbox path is not valid UTF-8: {}", path.display()))?
