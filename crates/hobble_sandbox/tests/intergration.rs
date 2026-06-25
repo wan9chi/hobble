@@ -1,33 +1,22 @@
-use std::{
-    env::home_dir,
-    fs::{self, File},
-    path::PathBuf,
-    process::Stdio,
-};
+use std::{env::home_dir, fs::File, io::Write, path::PathBuf, process::Stdio};
 
 use hobble_command_test::command_for_fn;
+use tempfile::{NamedTempFile, tempdir_in};
 
 #[test]
 fn allow_path() {
     let mut profile = hobble_sandbox::SandboxProfile::default();
 
-    let run_id = uuid::Uuid::new_v4().to_string();
-    let allowed_dirname = format!("allowed_{run_id}");
-    let disallowed_filename = format!("disallowed_{run_id}");
     let home = home_dir().unwrap();
-    let allowed_dir = home.join(&allowed_dirname);
-    let disallowed_path = home.join(&disallowed_filename);
-    let _cleanup = Cleanup {
-        allowed_dir: allowed_dir.clone(),
-        disallowed_path: disallowed_path.clone(),
-    };
+    let allowed_dir = tempdir_in(&home).unwrap();
+    let mut disallowed_file = NamedTempFile::new_in(&home).unwrap();
+    disallowed_file.write_all(b"disallowed").unwrap();
 
-    fs::create_dir(&allowed_dir).unwrap();
-    fs::write(&disallowed_path, b"disallowed").unwrap();
+    let allowed_dir_path = allowed_dir.path().to_path_buf();
+    let disallowed_path = disallowed_file.path().to_path_buf();
+    profile.allowed_paths.push(allowed_dir_path.clone());
 
-    profile.allowed_paths.push(allowed_dir.clone());
-
-    let allowed_missing_path = allowed_dir.join("missing");
+    let allowed_missing_path = allowed_dir_path.join("missing");
     let child_paths = format!(
         "{}\n{}",
         allowed_missing_path.display(),
@@ -41,7 +30,7 @@ fn allow_path() {
         println!("open allowed: {}", open_result(allowed_path));
         println!("open disallowed: {}", open_result(disallowed_path));
     });
-    command.current_dir(&allowed_dir);
+    command.current_dir(&allowed_dir_path);
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
 
     let output = hobble_sandbox::spawn_with_sandbox(command, &profile)
@@ -65,18 +54,6 @@ fn allow_path() {
             "open disallowed: PermissionDenied",
         ]
     );
-}
-
-struct Cleanup {
-    allowed_dir: PathBuf,
-    disallowed_path: PathBuf,
-}
-
-impl Drop for Cleanup {
-    fn drop(&mut self) {
-        let _ = fs::remove_file(&self.disallowed_path);
-        let _ = fs::remove_dir_all(&self.allowed_dir);
-    }
 }
 
 fn open_result(path: PathBuf) -> String {

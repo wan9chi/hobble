@@ -19,4 +19,4 @@ hobble_sandbox_macos = { workspace = true }
 
 [dev-dependencies]
 hobble_command_test = { workspace = true }
-uuid = { workspace = true, features = ["v4"] }
+tempfile = { workspace = true }
