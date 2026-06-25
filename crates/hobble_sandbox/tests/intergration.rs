@@ -1,15 +1,14 @@
-use std::{env::home_dir, fs::File, io::Write, path::PathBuf, process::Stdio};
+use std::{fs::File, io::Write, path::PathBuf, process::Stdio};
 
 use hobble_command_test::command_for_fn;
-use tempfile::{NamedTempFile, tempdir_in};
+use tempfile::{NamedTempFile, tempdir};
 
 #[test]
 fn allow_path() {
     let mut profile = hobble_sandbox::SandboxProfile::default();
 
-    let home = home_dir().unwrap();
-    let allowed_dir = tempdir_in(&home).unwrap();
-    let mut disallowed_file = NamedTempFile::new_in(&home).unwrap();
+    let allowed_dir = tempdir().unwrap();
+    let mut disallowed_file = NamedTempFile::new().unwrap();
     disallowed_file.write_all(b"disallowed").unwrap();
 
     let allowed_dir_path = allowed_dir.path().to_path_buf();
