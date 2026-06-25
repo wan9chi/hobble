@@ -117,6 +117,7 @@ dependencies = [
  "hobble_command_test",
  "hobble_sandbox_linux",
  "hobble_sandbox_macos",
+ "hobble_sandbox_profile",
  "uuid",
 ]
 
@@ -125,6 +126,7 @@ name = "hobble_sandbox_linux"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "hobble_sandbox_profile",
  "landlock",
 ]
 
@@ -133,7 +135,12 @@ name = "hobble_sandbox_macos"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "hobble_sandbox_profile",
 ]
+
+[[package]]
+name = "hobble_sandbox_profile"
+version = "0.1.0"
 
 [[package]]
 name = "js-sys"

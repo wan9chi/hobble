@@ -1,7 +1,7 @@
 #![cfg(target_os = "macos")]
 
 use std::{
-    ffi::{CStr, CString, OsStr},
+    ffi::{CStr, CString},
     io,
     os::{
         raw::{c_char, c_int},
@@ -13,6 +13,7 @@ use std::{
 };
 
 use anyhow::{Context, Result};
+use hobble_sandbox_profile::SandboxProfile;
 
 #[link(name = "sandbox")]
 unsafe extern "C" {
@@ -26,97 +27,98 @@ unsafe extern "C" {
     fn sandbox_free_error(errorbuf: *mut c_char);
 }
 
-#[derive(Debug)]
-pub struct SandboxBuilder {
-    profile: String,
-    parameters: String,
-    next_parameter_id: usize,
+pub fn spawn_with_sandbox(
+    mut command: Command,
+    profile: &SandboxProfile,
+) -> Result<Child, anyhow::Error> {
+    let (profile, parameter_strings, parameter_ptrs) = compile_profile(profile)?;
+    let sandbox = (profile, parameter_strings, parameter_ptrs);
+
+    // SAFETY: The closure only uses data prepared before fork and calls the
+    // platform sandbox entry point in the child before exec.
+    unsafe {
+        command.pre_exec(move || {
+            let _keep_parameters_alive = &sandbox.1;
+            apply_sandbox(&sandbox.0, &sandbox.2).map_err(io::Error::other)
+        });
+    }
+
+    command
+        .spawn()
+        .context("failed to spawn command with macOS sandbox")
 }
 
-impl Default for SandboxBuilder {
-    fn default() -> Self {
-        Self {
-            profile: String::from(
-                r#"(version 1)
+fn compile_profile(profile: &SandboxProfile) -> Result<(CString, Vec<CString>, Vec<usize>)> {
+    let mut profile_source = String::from(
+        r#"(version 1)
 (allow process-exec*)
 (deny file-read* file-write*)
 (import "system.sb")
 "#,
-            ),
-            parameters: String::new(),
-            next_parameter_id: 0,
-        }
-    }
-}
+    );
+    let mut parameters = String::new();
+    let mut next_parameter_id = 0;
 
-impl SandboxBuilder {
-    // Allow a path to be accessed by the sandboxed process.
-    // If the path is a directory, all files and directories under it will be allowed.
-    pub fn allow_path(&mut self, path: &OsStr) -> Result<&mut Self> {
-        let path = Path::new(path);
-        anyhow::ensure!(path.is_absolute(), "sandbox paths must be absolute");
-
-        let name = self.push_path_parameter("hobble_allow", path)?;
-
-        self.profile.push_str(&format!(
+    for path in &profile.allowed_paths {
+        let name = push_path_parameter(
+            &mut parameters,
+            &mut next_parameter_id,
+            "hobble_allow",
+            path,
+        )?;
+        profile_source.push_str(&format!(
             "(allow file-read* file-write* (subpath (param \"{name}\")))\n"
         ));
-
-        Ok(self)
     }
 
-    pub fn spawn(self, mut command: Command) -> Result<Child, anyhow::Error> {
-        let profile = CString::new(self.profile).context("sandbox profile contains a null byte")?;
-        let parameter_strings = parameter_cstrings(&self.parameters)?;
-        let mut parameter_ptrs = parameter_strings
-            .iter()
-            .map(|parameter| parameter.as_ptr() as usize)
-            .collect::<Vec<_>>();
-        parameter_ptrs.push(ptr::null::<c_char>() as usize);
-        let sandbox = (profile, parameter_strings, parameter_ptrs);
+    let profile = CString::new(profile_source).context("sandbox profile contains a null byte")?;
+    let parameter_strings = parameter_cstrings(&parameters)?;
+    let mut parameter_ptrs = parameter_strings
+        .iter()
+        .map(|parameter| parameter.as_ptr() as usize)
+        .collect::<Vec<_>>();
+    parameter_ptrs.push(ptr::null::<c_char>() as usize);
 
-        // SAFETY: The closure only uses data prepared before fork and calls the
-        // platform sandbox entry point in the child before exec.
-        unsafe {
-            command.pre_exec(move || {
-                let _keep_parameters_alive = &sandbox.1;
-                apply_sandbox(&sandbox.0, &sandbox.2).map_err(io::Error::other)
-            });
-        }
+    Ok((profile, parameter_strings, parameter_ptrs))
+}
 
-        command
-            .spawn()
-            .context("failed to spawn command with macOS sandbox")
-    }
+fn push_path_parameter(
+    parameters: &mut String,
+    next_parameter_id: &mut usize,
+    prefix: &str,
+    path: &Path,
+) -> Result<String> {
+    anyhow::ensure!(
+        path.is_absolute(),
+        "sandbox paths must be absolute: {}",
+        path.display()
+    );
+    let name = format!("{prefix}_{}", *next_parameter_id);
+    *next_parameter_id += 1;
+    let value = path
+        .to_str()
+        .with_context(|| format!("sandbox path is not valid UTF-8: {}", path.display()))?
+        .to_owned();
+    push_parameter(parameters, &name, &value)?;
+    Ok(name)
+}
 
-    fn push_path_parameter(&mut self, prefix: &str, path: &Path) -> Result<String> {
-        let name = format!("{prefix}_{}", self.next_parameter_id);
-        self.next_parameter_id += 1;
-        let value = path
-            .to_str()
-            .with_context(|| format!("sandbox path is not valid UTF-8: {}", path.display()))?
-            .to_owned();
-        self.push_parameter(&name, &value)?;
-        Ok(name)
-    }
+fn push_parameter(parameters: &mut String, name: &str, value: &str) -> Result<()> {
+    anyhow::ensure!(!name.is_empty(), "sandbox parameter name must not be empty");
+    anyhow::ensure!(
+        !name.contains('\0'),
+        "sandbox parameter name contains a null byte"
+    );
+    anyhow::ensure!(
+        !value.contains('\0'),
+        "sandbox parameter value contains a null byte"
+    );
 
-    fn push_parameter(&mut self, name: &str, value: &str) -> Result<()> {
-        anyhow::ensure!(!name.is_empty(), "sandbox parameter name must not be empty");
-        anyhow::ensure!(
-            !name.contains('\0'),
-            "sandbox parameter name contains a null byte"
-        );
-        anyhow::ensure!(
-            !value.contains('\0'),
-            "sandbox parameter value contains a null byte"
-        );
-
-        self.parameters.push_str(name);
-        self.parameters.push('\0');
-        self.parameters.push_str(value);
-        self.parameters.push('\0');
-        Ok(())
-    }
+    parameters.push_str(name);
+    parameters.push('\0');
+    parameters.push_str(value);
+    parameters.push('\0');
+    Ok(())
 }
 
 fn apply_sandbox(profile: &CString, parameter_ptrs: &[usize]) -> Result<()> {

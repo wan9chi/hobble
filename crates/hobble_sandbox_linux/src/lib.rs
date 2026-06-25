@@ -10,74 +10,38 @@ use std::{
 };
 
 use anyhow::{Context, Result};
+use hobble_sandbox_profile::SandboxProfile;
 use landlock::{
-    Access, AccessFs, BitFlags, CompatLevel, Compatible, PathBeneath, PathFd, Ruleset, RulesetAttr,
-    RulesetCreated, RulesetCreatedAttr, RulesetStatus, ABI,
+    ABI, Access, AccessFs, BitFlags, CompatLevel, Compatible, PathBeneath, PathFd, Ruleset,
+    RulesetAttr, RulesetCreated, RulesetCreatedAttr, RulesetStatus,
 };
 
-#[derive(Default, Debug)]
-pub struct SandboxBuilder {
-    allowed_paths: Vec<AllowedPath>,
-}
+pub fn spawn_with_sandbox(
+    mut command: Command,
+    profile: &SandboxProfile,
+) -> Result<Child, anyhow::Error> {
+    let executable_path = resolve_program_path(&command);
+    let ruleset = build_ruleset(&profile.allowed_paths, executable_path.as_deref())?;
+    let mut ruleset = Some(ruleset);
 
-#[derive(Debug)]
-struct AllowedPath {
-    path: PathBuf,
-    kind: AllowedPathKind,
-}
-
-#[derive(Debug)]
-enum AllowedPathKind {
-    Directory,
-    File,
-}
-
-impl SandboxBuilder {
-    // Allow a path to be accessed by the sandboxed process.
-    // If the path is a directory, all files and directories under it will be allowed.
-    pub fn allow_path(&mut self, path: &OsStr) -> Result<&mut Self> {
-        let path = Path::new(path);
-        anyhow::ensure!(path.is_absolute(), "sandbox paths must be absolute");
-
-        let metadata = fs::metadata(path)
-            .with_context(|| format!("failed to inspect sandbox path {}", path.display()))?;
-        let kind = if metadata.is_dir() {
-            AllowedPathKind::Directory
-        } else {
-            AllowedPathKind::File
-        };
-
-        self.allowed_paths.push(AllowedPath {
-            path: path.to_path_buf(),
-            kind,
+    // SAFETY: The closure applies the already-created Landlock ruleset in
+    // the child before exec.
+    unsafe {
+        command.pre_exec(move || {
+            let ruleset = ruleset
+                .take()
+                .ok_or_else(|| io::Error::other("Landlock ruleset already applied"))?;
+            apply_ruleset(ruleset)
         });
-        Ok(self)
     }
 
-    pub fn spawn(self, mut command: Command) -> Result<Child, anyhow::Error> {
-        let executable_path = resolve_program_path(&command);
-        let ruleset = build_ruleset(&self.allowed_paths, executable_path.as_deref())?;
-        let mut ruleset = Some(ruleset);
-
-        // SAFETY: The closure applies the already-created Landlock ruleset in
-        // the child before exec.
-        unsafe {
-            command.pre_exec(move || {
-                let ruleset = ruleset
-                    .take()
-                    .ok_or_else(|| io::Error::other("Landlock ruleset already applied"))?;
-                apply_ruleset(ruleset)
-            });
-        }
-
-        command
-            .spawn()
-            .context("failed to spawn command with Linux sandbox")
-    }
+    command
+        .spawn()
+        .context("failed to spawn command with Linux sandbox")
 }
 
 fn build_ruleset(
-    allowed_paths: &[AllowedPath],
+    allowed_paths: &[PathBuf],
     executable_path: Option<&Path>,
 ) -> Result<RulesetCreated> {
     let abi = ABI::V1;
@@ -118,26 +82,22 @@ fn build_ruleset(
     }
 
     for path in allowed_paths {
-        ruleset =
-            add_allowed_path_rule(ruleset, path, read_write_dir_access, read_write_file_access)
-                .with_context(|| format!("failed to allow sandbox path {}", path.path.display()))?;
+        anyhow::ensure!(
+            path.is_absolute(),
+            "sandbox paths must be absolute: {}",
+            path.display()
+        );
+        ruleset = add_path_rule(
+            ruleset,
+            path,
+            read_write_dir_access,
+            read_write_file_access,
+            true,
+        )
+        .with_context(|| format!("failed to allow sandbox path {}", path.display()))?;
     }
 
     Ok(ruleset)
-}
-
-fn add_allowed_path_rule(
-    ruleset: RulesetCreated,
-    path: &AllowedPath,
-    dir_access: BitFlags<AccessFs>,
-    file_access: BitFlags<AccessFs>,
-) -> Result<RulesetCreated> {
-    let access = match path.kind {
-        AllowedPathKind::Directory => dir_access,
-        AllowedPathKind::File => file_access,
-    };
-    let path_fd = PathFd::new(&path.path)?;
-    Ok(ruleset.add_rule(PathBeneath::new(path_fd, access))?)
 }
 
 fn add_path_rule(

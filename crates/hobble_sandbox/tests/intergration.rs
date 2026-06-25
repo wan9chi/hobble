@@ -9,7 +9,7 @@ use hobble_command_test::command_for_fn;
 
 #[test]
 fn allow_path() {
-    let mut builder = hobble_sandbox::SandboxBuilder::default();
+    let mut profile = hobble_sandbox::SandboxProfile::default();
 
     let run_id = uuid::Uuid::new_v4().to_string();
     let allowed_dirname = format!("allowed_{run_id}");
@@ -25,7 +25,7 @@ fn allow_path() {
     fs::create_dir(&allowed_dir).unwrap();
     fs::write(&disallowed_path, b"disallowed").unwrap();
 
-    builder.allow_path(allowed_dir.as_os_str()).unwrap();
+    profile.allowed_paths.push(allowed_dir.clone());
 
     let allowed_missing_path = allowed_dir.join("missing");
     let child_paths = format!(
@@ -44,7 +44,10 @@ fn allow_path() {
     command.current_dir(&allowed_dir);
     command.stdout(Stdio::piped()).stderr(Stdio::piped());
 
-    let output = builder.spawn(command).unwrap().wait_with_output().unwrap();
+    let output = hobble_sandbox::spawn_with_sandbox(command, &profile)
+        .unwrap()
+        .wait_with_output()
+        .unwrap();
     assert!(
         output.status.success(),
         "child failed with status {} stdout: {} stderr: {}",
