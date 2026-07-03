@@ -9,5 +9,3 @@ repository.workspace = true
 [dependencies]
 anyhow.workspace = true
 hobble_sandbox_profile = { workspace = true }
-
-[dev-dependencies]

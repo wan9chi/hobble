@@ -1,16 +1,16 @@
 #![cfg(target_os = "linux")]
 
 use std::{
-    env,
-    ffi::{OsStr, OsString},
     fs, io,
-    os::unix::{ffi::OsStrExt, process::CommandExt},
-    path::{Path, PathBuf},
+    os::unix::process::CommandExt,
+    path::Path,
     process::{Child, Command},
 };
 
 use anyhow::{Context, Result};
-use hobble_sandbox_profile::SandboxProfile;
+use hobble_sandbox_profile::{
+    ResolvedEntry, SandboxProfile, resolve_entries, resolve_program_path,
+};
 use landlock::{
     ABI, Access, AccessFs, BitFlags, CompatLevel, Compatible, PathBeneath, PathFd, Ruleset,
     RulesetAttr, RulesetCreated, RulesetCreatedAttr, RulesetStatus,
@@ -21,7 +21,7 @@ pub fn spawn_with_sandbox(
     profile: &SandboxProfile,
 ) -> Result<Child, anyhow::Error> {
     let executable_path = resolve_program_path(&command);
-    let ruleset = build_ruleset(&profile.allowed_paths, executable_path.as_deref())?;
+    let ruleset = build_ruleset(profile, executable_path.as_deref())?;
     let mut ruleset = Some(ruleset);
 
     // SAFETY: The closure applies the already-created Landlock ruleset in
@@ -41,7 +41,7 @@ pub fn spawn_with_sandbox(
 }
 
 fn build_ruleset(
-    allowed_paths: &[PathBuf],
+    profile: &SandboxProfile,
     executable_path: Option<&Path>,
 ) -> Result<RulesetCreated> {
     let abi = ABI::V1;
@@ -65,6 +65,16 @@ fn build_ruleset(
         )?;
     }
 
+    for path in device_nodes() {
+        ruleset = add_path_rule(
+            ruleset,
+            Path::new(path),
+            read_write_dir_access,
+            read_write_file_access,
+            false,
+        )?;
+    }
+
     if let Some(executable_path) = executable_path {
         ruleset = add_path_rule(
             ruleset,
@@ -81,23 +91,29 @@ fn build_ruleset(
         })?;
     }
 
-    for path in allowed_paths {
-        anyhow::ensure!(
-            path.is_absolute(),
-            "sandbox paths must be absolute: {}",
-            path.display()
-        );
-        ruleset = add_path_rule(
-            ruleset,
-            path,
-            read_write_dir_access,
-            read_write_file_access,
-            true,
-        )
-        .with_context(|| format!("failed to allow sandbox path {}", path.display()))?;
+    for entry in resolve_entries(&profile.allowed_reads)? {
+        ruleset = add_entry_rule(ruleset, &entry, read_exec_dir_access, read_exec_file_access)?;
+    }
+
+    for entry in resolve_entries(&profile.allowed_writes)? {
+        ruleset = add_entry_rule(ruleset, &entry, read_write_dir_access, read_write_file_access)?;
     }
 
     Ok(ruleset)
+}
+
+// Landlock rules attach to inodes, so opening the literal path (which follows
+// symlinks) covers the resolved spelling as well.
+fn add_entry_rule(
+    ruleset: RulesetCreated,
+    entry: &ResolvedEntry,
+    dir_access: BitFlags<AccessFs>,
+    file_access: BitFlags<AccessFs>,
+) -> Result<RulesetCreated> {
+    let access = if entry.is_dir { dir_access } else { file_access };
+    let path_fd = PathFd::new(&entry.literal)
+        .with_context(|| format!("failed to allow sandbox path {}", entry.literal.display()))?;
+    Ok(ruleset.add_rule(PathBeneath::new(path_fd, access))?)
 }
 
 fn add_path_rule(
@@ -145,32 +161,6 @@ fn runtime_roots() -> &'static [&'static str] {
     &["/bin", "/sbin", "/lib", "/lib64", "/usr", "/etc"]
 }
 
-fn resolve_program_path(command: &Command) -> Option<PathBuf> {
-    let program = Path::new(command.get_program());
-    if program.is_absolute() {
-        return Some(program.to_path_buf());
-    }
-
-    if program.as_os_str().as_bytes().contains(&b'/') {
-        let base = command
-            .get_current_dir()
-            .map(Path::to_path_buf)
-            .or_else(|| env::current_dir().ok())?;
-        return Some(base.join(program));
-    }
-
-    let path = command_path_env(command)?;
-    env::split_paths(&path)
-        .map(|path_dir| path_dir.join(program))
-        .find(|candidate| candidate.exists())
-}
-
-fn command_path_env(command: &Command) -> Option<OsString> {
-    let mut path = env::var_os("PATH");
-    for (key, value) in command.get_envs() {
-        if key == OsStr::new("PATH") {
-            path = value.map(OsString::from);
-        }
-    }
-    path
+fn device_nodes() -> &'static [&'static str] {
+    &["/dev/null", "/dev/zero", "/dev/random", "/dev/urandom"]
 }

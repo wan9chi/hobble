@@ -7,13 +7,13 @@ use std::{
         raw::{c_char, c_int},
         unix::process::CommandExt,
     },
-    path::Path,
+    path::{Path, PathBuf},
     process::{Child, Command},
     ptr,
 };
 
 use anyhow::{Context, Result};
-use hobble_sandbox_profile::SandboxProfile;
+use hobble_sandbox_profile::{SandboxProfile, resolve_entries, resolve_program_path};
 
 #[link(name = "sandbox")]
 unsafe extern "C" {
@@ -31,7 +31,9 @@ pub fn spawn_with_sandbox(
     mut command: Command,
     profile: &SandboxProfile,
 ) -> Result<Child, anyhow::Error> {
-    let (profile, parameter_strings, parameter_ptrs) = compile_profile(profile)?;
+    let executable_path = resolve_program_path(&command);
+    let (profile, parameter_strings, parameter_ptrs) =
+        compile_profile(profile, executable_path.as_deref())?;
     let sandbox = (profile, parameter_strings, parameter_ptrs);
 
     // SAFETY: The closure only uses data prepared before fork and calls the
@@ -48,28 +50,55 @@ pub fn spawn_with_sandbox(
         .context("failed to spawn command with macOS sandbox")
 }
 
-fn compile_profile(profile: &SandboxProfile) -> Result<(CString, Vec<CString>, Vec<usize>)> {
+fn compile_profile(
+    profile: &SandboxProfile,
+    executable_path: Option<&Path>,
+) -> Result<(CString, Vec<CString>, Vec<usize>)> {
+    // `system.sb` supplies the OS baseline (dyld, /System, /usr/lib,
+    // /dev/null and friends); the runtime roots mirror the Linux backend so
+    // shells and system tools work without profile entries.
+    // `(deny process-exec*)` also catches `process-fork`, which creates no
+    // new code image, so fork is re-allowed explicitly.
     let mut profile_source = String::from(
         r#"(version 1)
-(allow process-exec*)
-(deny file-read* file-write*)
+(deny process-exec* file-read* file-write*)
 (import "system.sb")
+(allow process-fork)
+(allow file-read-metadata)
+(allow file-read* process-exec* (subpath "/bin") (subpath "/sbin") (subpath "/usr") (subpath "/opt/homebrew"))
 "#,
     );
     let mut parameters = String::new();
     let mut next_parameter_id = 0;
 
-    for path in &profile.allowed_paths {
+    if let Some(executable_path) = executable_path {
         let name = push_path_parameter(
             &mut parameters,
             &mut next_parameter_id,
-            "hobble_allow",
-            path,
+            "hobble_exec",
+            executable_path,
         )?;
         profile_source.push_str(&format!(
-            "(allow file-read* file-write* (subpath (param \"{name}\")))\n"
+            "(allow file-read* process-exec* (literal (param \"{name}\")))\n"
         ));
     }
+
+    push_entry_rules(
+        &mut profile_source,
+        &mut parameters,
+        &mut next_parameter_id,
+        "hobble_read",
+        "file-read* process-exec*",
+        &profile.allowed_reads,
+    )?;
+    push_entry_rules(
+        &mut profile_source,
+        &mut parameters,
+        &mut next_parameter_id,
+        "hobble_write",
+        "file-read* file-write* process-exec*",
+        &profile.allowed_writes,
+    )?;
 
     let profile = CString::new(profile_source).context("sandbox profile contains a null byte")?;
     let parameter_strings = parameter_cstrings(&parameters)?;
@@ -95,13 +124,34 @@ fn push_path_parameter(
     );
     let name = format!("{prefix}_{}", *next_parameter_id);
     *next_parameter_id += 1;
-    let path = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
     let value = path
         .to_str()
         .with_context(|| format!("sandbox path is not valid UTF-8: {}", path.display()))?
         .to_owned();
     push_parameter(parameters, &name, &value)?;
     Ok(name)
+}
+
+fn push_entry_rules(
+    profile_source: &mut String,
+    parameters: &mut String,
+    next_parameter_id: &mut usize,
+    prefix: &str,
+    operations: &str,
+    entries: &[PathBuf],
+) -> Result<()> {
+    for entry in resolve_entries(entries)? {
+        for path in entry.paths() {
+            let name = push_path_parameter(parameters, next_parameter_id, prefix, path)?;
+            profile_source
+                .push_str(&format!("(allow {operations} (literal (param \"{name}\")))\n"));
+            if entry.is_dir {
+                profile_source
+                    .push_str(&format!("(allow {operations} (subpath (param \"{name}\")))\n"));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn push_parameter(parameters: &mut String, name: &str, value: &str) -> Result<()> {
