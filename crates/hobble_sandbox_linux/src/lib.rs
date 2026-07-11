@@ -31,6 +31,7 @@ pub fn spawn_with_sandbox(
             let ruleset = ruleset
                 .take()
                 .ok_or_else(|| io::Error::other("Landlock ruleset already applied"))?;
+            let ruleset = grant_proc_self(ruleset)?;
             apply_ruleset(ruleset)
         });
     }
@@ -71,6 +72,20 @@ fn build_ruleset(
             Path::new(path),
             read_write_dir_access,
             read_write_file_access,
+            false,
+        )?;
+    }
+
+    // Global, non-per-process `/proc` info files. Per-process access is
+    // handled separately: the child's own `/proc/self` is granted in
+    // `grant_proc_self` (see below), and other processes' directories stay
+    // denied so their `environ`/`cmdline` are unreadable.
+    for path in proc_info_files() {
+        ruleset = add_path_rule(
+            ruleset,
+            Path::new(path),
+            read_exec_dir_access,
+            read_exec_file_access,
             false,
         )?;
     }
@@ -138,6 +153,25 @@ fn add_path_rule(
     Ok(ruleset.add_rule(PathBeneath::new(path_fd, access))?)
 }
 
+/// Grants the calling process read access to its own `/proc/self` subtree.
+///
+/// Runs in the child after fork, where `/proc/self` resolves to the child's
+/// own per-process directory. `/proc/self` cannot be granted from the parent
+/// because Landlock pins the resolved inode, which would be the parent's
+/// directory. Processes the child later spawns get their own per-process
+/// directory that this frozen ruleset does not cover, so they cannot read
+/// their `/proc/self`.
+fn grant_proc_self(ruleset: RulesetCreated) -> io::Result<RulesetCreated> {
+    let access = AccessFs::from_read(ABI::V1);
+    let Ok(path_fd) = PathFd::new("/proc/self") else {
+        // `/proc` is not mounted; nothing to grant.
+        return Ok(ruleset);
+    };
+    ruleset
+        .add_rule(PathBeneath::new(path_fd, access))
+        .map_err(|error| io::Error::other(error.to_string()))
+}
+
 fn apply_ruleset(ruleset: RulesetCreated) -> io::Result<()> {
     let status = ruleset
         .restrict_self()
@@ -163,4 +197,14 @@ fn runtime_roots() -> &'static [&'static str] {
 
 fn device_nodes() -> &'static [&'static str] {
     &["/dev/null", "/dev/zero", "/dev/random", "/dev/urandom"]
+}
+
+fn proc_info_files() -> &'static [&'static str] {
+    &[
+        "/proc/cpuinfo",
+        "/proc/stat",
+        "/proc/meminfo",
+        "/proc/loadavg",
+        "/proc/uptime",
+    ]
 }

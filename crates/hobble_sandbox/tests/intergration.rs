@@ -189,6 +189,36 @@ fn dev_null_is_writable_by_default() {
     );
 }
 
+/// Linux grants the process its own `/proc/self` and the global info files,
+/// but never another process's `/proc/<pid>`, so environment and command
+/// line of other processes stay unreadable.
+#[cfg(target_os = "linux")]
+#[test]
+fn proc_self_readable_other_processes_denied() {
+    let victim = std::process::Command::new("/bin/sleep")
+        .arg("30")
+        .spawn()
+        .unwrap();
+    let pid = victim.id();
+    let environ = PathBuf::from(format!("/proc/{pid}/environ"));
+    let cmdline = PathBuf::from(format!("/proc/{pid}/cmdline"));
+
+    assert_access(
+        &SandboxProfile::default(),
+        &[
+            (Read, Path::new("/proc/cpuinfo"), Allowed),
+            (Read, Path::new("/proc/self/status"), Allowed),
+            (Read, Path::new("/proc/self/environ"), Allowed),
+            (Read, &environ, Denied),
+            (Read, &cmdline, Denied),
+        ],
+    );
+
+    let mut victim = victim;
+    let _ = victim.kill();
+    let _ = victim.wait();
+}
+
 #[test]
 fn relative_entry_is_rejected() {
     let mut profile = SandboxProfile::default();

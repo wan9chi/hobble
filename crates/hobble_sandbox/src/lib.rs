@@ -9,8 +9,15 @@
 //!   runtime roots `/bin`, `/sbin`, `/usr`, and `/opt/homebrew` are readable
 //!   and executable, and path metadata (`stat`) is readable everywhere.
 //! - Linux: the runtime roots `/bin`, `/sbin`, `/lib`, `/lib64`, `/usr`, and
-//!   `/etc` are readable and executable, and the device nodes `/dev/null`,
-//!   `/dev/zero`, `/dev/random`, and `/dev/urandom` are read-write.
+//!   `/etc` are readable and executable; the device nodes `/dev/null`,
+//!   `/dev/zero`, `/dev/random`, and `/dev/urandom` are read-write; the
+//!   global `/proc` info files (`/proc/cpuinfo`, `/proc/stat`,
+//!   `/proc/meminfo`, `/proc/loadavg`, `/proc/uptime`) are readable; and the
+//!   process reads its own `/proc/self`. Other processes' `/proc/<pid>`
+//!   directories stay denied, so their environment and command line are not
+//!   readable. Processes the sandboxed command later spawns get a fresh
+//!   per-process directory that the frozen ruleset does not cover, so they
+//!   cannot read their own `/proc/self`.
 //!
 //! Process exec is confined to the same policy: the runtime roots, the
 //! profile entries (reads imply exec), and the spawned command's resolved
